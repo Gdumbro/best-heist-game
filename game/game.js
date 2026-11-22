@@ -6,6 +6,10 @@
    Round 7: 4 guards, 4 cameras, a sweeping laser turret on the vault,
    alarm escalation (ALERT / LOCKDOWN + response guard), and 2 stealable
    gallery paintings. Same hall, same gold/red-carpet identity.
+   Round 8: cooler win route — cam 1 narrowed off the left-edge climb,
+   guard 1 loop pulled off the transit lines, cam 3 moved east off the
+   south line, guard 2/3 loops lifted off the exit leg, shorter/slower
+   chases, faster alarm decay. Thresholds and loot unchanged.
 */
 (function () {
   'use strict';
@@ -37,11 +41,33 @@
   // Timed laser grid across the red-carpet vault approach (x 430..530).
   // Each beam cycles: on for LASER_ON, off for the rest of the period.
   // At LOCKDOWN the grid fires faster (period 2.6s -> 1.9s).
-  var LASER_X1 = 430, LASER_X2 = 530, LASER_PERIOD = 2.6, LASER_PERIOD_LOCK = 1.9, LASER_ON = 1.5;
+  // Round-8 retune: LASER_ON 1.5s->1.2s — the OFF gaps (1.4s) are now long
+  // enough to cross both beams in one gap; a live beam is still +30 alarm/s
+  // and the warming flicker still warns 0.4s ahead, so timing still matters.
+  // Retest-7 retune: LASER_ON 1.2s->0.9s (duty 46%->35%, all-clear window
+  // 0.8s->1.1s). A blind 4-crossing run still meets a live beam about a
+  // third of the time, but the worst case (all beams live, +35/run) is now
+  // rare; a timed crossing is clean and a hack is clean, as intended.
+  // Retest-9 retune: LASER_ON 0.9s->0.8s (duty 35%->31%, all-clear window
+  // 1.1s->1.2s per beam; the shared all-clear window is ~1.2s). The carpet
+  // was the hottest clean-win segment (verify run 0: grab +35, return +32);
+  // a slightly longer gap makes a timed crossing cheaper without removing
+  // the punishment for a blind one.
+  // Retest-4 retune: phases tightened (0/0.9/1.8 -> 0/0.3/0.6) so the three
+  // beams fire almost together and leave a real all-clear window (~0.8s per
+  // cycle) for a player who watches the warming flicker — a blind crossing
+  // still meets a live beam about half the time, but a timed one is clean.
+  var LASER_X1 = 430, LASER_X2 = 530, LASER_PERIOD = 2.6, LASER_PERIOD_LOCK = 1.9, LASER_ON = 0.8;
   var LASERS = [
-    { y: 350, phase: 0.0 },
-    { y: 395, phase: 0.9 },
-    { y: 440, phase: 1.8 }
+    // Retest-5 retune: top beam y=350 -> y=335. The grab spot (480,360-369)
+    // sat INSIDE the y=350 beam's hit zone (|y-350| < 22), so every grab
+    // attempt ate +40/s while standing at the vault if the beam was live
+    // (+14.6/run just for grabbing). At y=335 the beam still guards the
+    // vault's face (a thief hugging the vault gets zapped) but the grab spot
+    // is 25px clear of it — the grid taxes the crossing, not the grab itself.
+    { y: 335, phase: 0.0 },
+    { y: 395, phase: 0.3 },
+    { y: 440, phase: 0.6 }
   ];
   // Sweeping laser: a rotating emitter turret on the vault's bottom edge.
   // Its beam sweeps +/-SWEEP across the carpet approach below the vault.
@@ -72,15 +98,21 @@
   var seenNow = false, seenBy = '', chaseFlash = 0;
   var toastTimer = 0, tickTimer = 0, time = 0;   // time = deterministic clock (seconds)
   var sweeperAngle = Math.PI / 2, sweeperHits = 0; // rotating beam angle + times it touched the thief
-  var player, guards, cameras, response;  // response = LOCKDOWN response guard (dormant until alarm >= 60)
+  var player, guards, cameras, response;  // response = LOCKDOWN response guard (dormant until alarm >= 75)
 
-  // Alarm escalation: 0 CALM (<30%), 1 ALERT (>=30%), 2 LOCKDOWN (>=65%).
+  // Alarm escalation: 0 CALM (<30%), 1 ALERT (>=30%), 2 LOCKDOWN (>=75%).
   // ALERT speeds cameras x1.25 and guards x1.1; LOCKDOWN adds red alert lighting,
   // a faster laser grid, cameras x1.5 / guards x1.2, and the response guard.
   // Thresholds sit above a single brief sighting on purpose: one camera flash
   // must not start a death spiral (round-7 tuning: ALERT was 25% and the faster
   // cameras fed sightings back into the alarm until every top route busted).
-  function alertLevel() { return alarm >= 65 ? 2 : (alarm >= 30 ? 1 : 0); }
+  // Round-8 retune: LOCKDOWN was 65% — but a clean win route peaks at 55-70
+  // (climb ~35 + carpet ~25), so half of all clean runs tripped LOCKDOWN on
+  // the return leg and the response guard (+20-28) camped the exit, turning
+  // LOUD wins into busts. At 75% LOCKDOWN is the "you really messed up"
+  // state: clean runs stay in ALERT (still tense), sloppy runs blow past 75
+  // in ~2s of sustained sighting and still face the response guard.
+  function alertLevel() { return alarm >= 75 ? 2 : (alarm >= 30 ? 1 : 0); }
 
   function resetGame() {
     state = 'playing'; alarm = 0; loot = false; elapsed = 0; time = 0;
@@ -93,47 +125,94 @@
       // Guard 1: slow rectangular loop down the left hall (Gallery), counter-clockwise
       // so its cone never covers the vault approach; left leg at x=180, clear of the
       // display case and far enough from the left wall that a climbing thief is only briefly seen.
-      // Right leg at x=340 (not 380): the old leg's down-right cone just clipped the
-      // red carpet at (480,448) and the guard would chase the thief down the hall.
-      { x: 180, y: 415, r: 14, wp: [{ x: 180, y: 415 }, { x: 180, y: 250 }, { x: 340, y: 250 }, { x: 340, y: 415 }], wi: 1,
+      // Right leg at x=320 (not 340) and top leg at y=225 (not 250): round-8 retune —
+      // the old legs ran 10px above the y=260 gallery transit line and 40px west of
+      // the x=380 south line, so every corner turn swept the main routes and a chase
+      // shadowed the thief down them at ~44 alarm/s. The new legs give the transit
+      // lines 35px / 60px clearance: a corner glimpse is brief and position-dependent
+      // instead of a standing trap, and the guard still patrols the gallery properly.
+      { x: 180, y: 415, r: 14, wp: [{ x: 180, y: 415 }, { x: 180, y: 225 }, { x: 320, y: 225 }, { x: 320, y: 415 }], wi: 1,
         angle: -Math.PI / 2, speed: 68, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.7 },
       // Guard 2: faster diamond loop on the right side, longer look-around pauses.
       // Its lower waypoint sits up the right wall, clear of the gold bar below it.
-      { x: 820, y: 140, r: 14, wp: [{ x: 820, y: 140 }, { x: 770, y: 280 }, { x: 820, y: 460 }, { x: 860, y: 200 }], wi: 1,
+      // Round-8 retune: (820,460)->(820,430) — the old waypoint sat 40px above the
+      // y=500 exit leg, so the descending leg's down-right cone covered the exit
+      // leg's east end and a glimpse chased the thief down the corridor.
+      { x: 820, y: 140, r: 14, wp: [{ x: 820, y: 140 }, { x: 770, y: 280 }, { x: 820, y: 430 }, { x: 860, y: 200 }], wi: 1,
         angle: Math.PI / 2, speed: 84, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 1.2 },
-      // Guard 3: NEW — patrols a tight rectangle in the Security corridor, up in the
-      // middle-right (y 300..400) so its cone never covers the bottom corridor to the
-      // EXIT: the old bottom leg at y=495 faced left straight down the y=510 exit
-      // route and chased the thief all the way to the door. Left leg x=790 clears
-      // the display case (ends x=760); bottom leg y=400 clears the bottom-right desk.
-      { x: 790, y: 300, r: 14, wp: [{ x: 790, y: 300 }, { x: 860, y: 300 }, { x: 860, y: 400 }, { x: 790, y: 400 }], wi: 1,
-        angle: 0, speed: 76, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.9 },
+      // Guard 3: patrols a tight rectangle in the Security corridor.
+      // Round-8 retune: loop shifted up to y 280..370 (was 300..400) — the old
+      // bottom corners sat 100px above the y=500 exit leg and their turns swept
+      // it, so one glimpse chased the thief all the way to the door. Left leg
+      // x=790 still clears the display case (ends x=760).
+      // Round-8 retest-3 retune: the loop now runs COUNTER-clockwise (was
+      // clockwise). Clockwise, its top leg faced east straight at the thief's
+      // (890,270) entry and its right leg ran parallel 30px west of the east
+      // descent, so the whole east transit sat in-cone (+52-57 alarm/run).
+      // Counter-clockwise the top leg faces west (the thief is behind it), the
+      // right leg faces north, and only the bottom-left corner turn briefly
+      // sweeps the exit leg — the corridor is still patrolled, the approach isn't.
+      // Retest-6 retune: pause 0.9s->0.5s. The counter-clockwise loop pauses at
+      // its bottom-left corner (790,370) facing SOUTH, and the y=500 bottom
+      // route passes straight through that cone for ~163px (~+30 when the
+      // timing aligns). A shorter pause caps the trap at ~+20 and keeps the
+      // guard moving instead of sitting on the route.
+      { x: 790, y: 280, r: 14, wp: [{ x: 790, y: 280 }, { x: 790, y: 370 }, { x: 860, y: 370 }, { x: 860, y: 280 }], wi: 1,
+        angle: Math.PI / 2, speed: 76, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.5 },
       // Guard 4: NEW (round 7) — back-and-forth along the Gallery north-west
-      // corner, (70,60) <-> (140,60), slow with long look-around pauses. It
+      // corner, (70,60) <-> (140,60), slow with look-around pauses. It
       // only ever faces east/west, guarding the north-west corner and the
       // gold bars' approach. The beat sits in the clear corridor between the
       // top wall and the desks, so the guard never walks through furniture.
-      // Its cone only briefly grazes the top route's west end (the thief is
-      // in range for ~35px at the (300,95) start) and never covers the GHOST
-      // route: the left edge, the vault approach, the (150,260)->(84,400)
-      // diagonal and the y=510 bottom route are all out of its cone or out
-      // of range. (The first three beats — the bottom strip, the Gallery
-      // centre, the top corridor — each put its cone across a main route and
-      // poisoned the GHOST run or busted the win route.) A second, distinct
-      // patrol shape next to the three loops.
+      // Round-8 retune: pause 1.4s->0.8s — the old pause put its turn (cone
+      // sweeping south across the top corridor) at exactly the moment the win
+      // route's climb reached (130,95) every run (+22 alarm). Shorter pauses
+      // shift the turn off the usual climb and make the guard more active.
       { x: 70, y: 60, r: 14, wp: [{ x: 70, y: 60 }, { x: 140, y: 60 }], wi: 1,
-        angle: 0, speed: 60, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 1.4 }
+        angle: 0, speed: 60, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.8 }
     ];
-    // Response guard: dormant until LOCKDOWN (alarm >= 65), then it deploys at
+    // Response guard: dormant until LOCKDOWN (alarm >= 75), then it deploys at
     // the exit corridor and patrols there until the alarm falls below 45%.
     response = { x: 880, y: 470, r: 14, wp: [{ x: 820, y: 440 }, { x: 900, y: 440 }, { x: 900, y: 500 }, { x: 820, y: 500 }], wi: 1,
       angle: 0, speed: 96, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.5, dormant: true };
     cameras = [
-      { x: 42, y: 42, base: 0.88, sweep: 0.62, speed: 0.7, phase: 0, angle: 0.88, range: 245, seen: false },
+      // Camera 1: top-left wall mount. Round-8 retune — base 0.88->0.60, sweep
+      // 0.62->0.42, range 245->210, phase 0->3.1: the old cone sat across the whole
+      // left-edge climb at ~48% sweep duty and alone added +50 alarm on the win
+      // route's first 2 seconds. The narrower cone still watches the top-left
+      // corner and the gold-bar-1 approach (lingering there still gets spotted),
+      // but the phase shift means the sweep points down the left edge while the
+      // thief is still crossing the hall — a thief transiting the climb at the
+      // usual pace is only briefly in-cone, while a slow one still gets caught.
+      { x: 42, y: 42, base: 0.60, sweep: 0.42, speed: 0.7, phase: 3.1, angle: 0.60, range: 210, seen: false },
       { x: 918, y: 42, base: Math.PI - 0.88, sweep: 0.9, speed: 0.45, phase: 2.4, angle: Math.PI - 0.88, range: 240, seen: false },
-      // Camera 3: NEW — bottom-centre wall mount, sweeping up the red carpet over
+      // Camera 3: bottom-centre wall mount, sweeping up the red carpet over
       // the laser grid and the vault approach. Far from the spawn point (dist ~400 > range).
-      { x: 480, y: 545, base: -Math.PI / 2, sweep: 0.75, speed: 0.55, phase: 1.2, angle: -Math.PI / 2, range: 280, seen: false },
+      // Round-8 retune: moved east to (560,545), range 280->240, sweep 0.75->0.65 —
+      // the old mount at (480,545) covered the whole southern hall, so the x=380
+      // south line and the west bottom route sat in-cone for most of the sweep
+      // (+28-42 alarm/run). It still guards the carpet and vault approach (~27%
+      // sweep duty on the carpet), just not the far west.
+      // Round-8 carpet retune: base -PI/2 -> -1.35 (cone tilted east) — the
+      // carpet sat at the cone's centre (~52% duty) and stacked with the laser
+      // grid into a kill zone (+32-59/run). At ~35% duty the carpet is still
+      // watched (lingering gets spotted) but transiting it is survivable.
+      // Retest-10 retune: base -1.35 -> -1.25 (cone tilted a touch further
+      // east). The GHOST run's carpet waits at (480,415) still sat in-cone
+      // ~20% of the sweep and cam3 alone added +24/run to a careful sneak —
+      // the camera was doing the laser grid's job. At ~11% duty the carpet
+      // is still watched (a 3s linger still costs ~+3) but a timed sneak
+      // crossing is no longer dominated by the camera.
+      // Retest-3 retune: sweep 0.65->0.5, speed 0.55->0.8 — the slow sweep made
+      // the carpet all-or-nothing by phase (+12 one run, +42 the next): a 2s
+      // transit could sit in the cone the whole time. The faster, narrower
+      // sweep crosses the thief 2-3 times per transit instead, so the cost
+      // converges to its ~26% average (~+12) instead of swinging with the phase.
+      // Retest-6 retune: range 240->180 — the carpet's north half (the grab
+      // point, 202px away) is now out of range, so the camera can no longer sit
+      // on the thief for the whole 1.5s return (+38 worst case). It still
+      // watches the carpet's south half and the bottom-route approach.
+      { x: 560, y: 545, base: -1.25, sweep: 0.5, speed: 0.8, phase: 1.2, angle: -1.25, range: 180, seen: false },
       // Camera 4: NEW (round 7) — bottom-centre-left wall mount, sweeping the
       // bottom corridor. Range 200 keeps it off the spawn point (dist ~220).
       { x: 300, y: 558, base: -Math.PI / 2, sweep: 0.5, speed: 0.6, phase: 3.1, angle: -Math.PI / 2, range: 200, seen: false }
@@ -339,12 +418,15 @@
       gd.chase -= dt;
       var ta = Math.atan2(gd.chaseY - gd.y, gd.chaseX - gd.x);
       gd.angle += angDiff(ta, gd.angle) * Math.min(1, dt * 8);
-      moveCircle(gd, Math.cos(gd.angle) * 118 * dt, Math.sin(gd.angle) * 118 * dt);
+      // Chase speed 100 (was 118): a running thief (175) now opens 75px/s on a
+      // chasing guard, so one glimpse costs a brief chase instead of a guard
+      // shadowing the thief down a whole corridor at ~44 alarm/s (round-8 retune).
+      moveCircle(gd, Math.cos(gd.angle) * 100 * dt, Math.sin(gd.angle) * 100 * dt);
       // Reached the last-seen spot: give up and resume the patrol. Without this
       // a guard that chased a thief standing still (e.g. grabbing the diamond)
-      // would stand point-blank on them for the full 1.8s chase at ~44 alarm/s.
+      // would stand point-blank on them for the full chase at ~44 alarm/s.
       var cd = dist(gd.x, gd.y, gd.chaseX, gd.chaseY);
-      if (cd < 14) { gd.chase = 0; gd.chaseStuck = 0; gd.cooldown = 1.5; }
+      if (cd < 14) { gd.chase = 0; gd.chaseStuck = 0; gd.cooldown = 2.0; }
       else {
         // Stuck: the chase target is behind an obstacle (e.g. the vault) and the
         // guard is sliding along it without getting closer. Give up instead of
@@ -352,14 +434,14 @@
         if (gd.chaseLastD === undefined || cd < gd.chaseLastD - 8) { gd.chaseLastD = cd; gd.chaseStuck = 0; }
         else {
           gd.chaseStuck = (gd.chaseStuck || 0) + dt;
-          if (gd.chaseStuck > 0.6) { gd.chase = 0; gd.chaseStuck = 0; gd.cooldown = 1.5; }
+          if (gd.chaseStuck > 0.6) { gd.chase = 0; gd.chaseStuck = 0; gd.cooldown = 2.0; }
         }
       }
       // Chase timer ran out: the guard gives up and cannot start a new chase
-      // for 1.5s. Without the cooldown a guard standing ON the thief (it just
+      // for 2.0s (was 1.5s). Without the cooldown a guard standing ON the thief (it just
       // chased them down) re-triggers the chase every single frame and the
       // alarm climbs at ~44/s forever while the guard never walks away.
-      if (gd.chase <= 0) { gd.cooldown = Math.max(gd.cooldown || 0, 1.5); }
+      if (gd.chase <= 0) { gd.cooldown = Math.max(gd.cooldown || 0, 2.0); }
     } else {
       var tgt = gd.wp[gd.wi];
       var d = dist(gd.x, gd.y, tgt.x, tgt.y);
@@ -425,17 +507,25 @@
     var seers = guards.concat(response.dormant ? [] : [response]);
     for (var gi = 0; gi < seers.length; gi++) {
       var gg = seers[gi];
-      if (canSee(gg.x, gg.y, gg.angle, 195, 0.56)) {
+      // A chasing guard runs head-down to the last-seen spot, so it only
+      // re-acquires the thief within 120px (round-8 retune): the old 195px
+      // chase vision let one 0.2s corner glimpse turn into a 1.4s shadowing
+      // at ~44 alarm/s down a whole corridor. A thief standing still is still
+      // re-spotted after the chase (patrol vision is still 195px), so the
+      // guard-lane bust still works — a running thief just outruns the chase.
+      if (canSee(gg.x, gg.y, gg.angle, gg.chase > 0 ? 120 : 195, 0.56)) {
         gg.seen = true; seenNow = true; seenBy = 'GUARD';
         var gd2 = dist(gg.x, gg.y, player.x, player.y);
         var prox = gd2 < 90 ? 1.25 : (gd2 > 150 ? 0.7 : 1.0);
         alarm += 26 * speedFactor * prox * dt;
-        // A guard that loses sight gives up sooner now (1.8s, was 2.5s), and it
+        // A guard that loses sight gives up sooner now (1.4s, was 1.8s), and it
         // chases the LAST SEEN SPOT, not the thief: the old code re-aimed the chase
         // at the thief every frame, so a guard that spotted the thief in a straight
         // corridor tracked them down the whole hall and never let go. A guard on
         // its post-chase cooldown cannot start a new chase yet (see stepGuard).
-        if (gg.chase <= 0 && (gg.cooldown || 0) <= 0) { gg.chase = 1.8; gg.chaseX = player.x; gg.chaseY = player.y; gg.chaseLastD = undefined; gg.chaseStuck = 0; sfx('seen'); }
+        // Round-8 retune: 1.8s->1.4s, so a single glimpse buys a short chase the
+        // thief outruns instead of a 1.8s shadowing at ~44 alarm/s.
+        if (gg.chase <= 0 && (gg.cooldown || 0) <= 0) { gg.chase = 1.4; gg.chaseX = player.x; gg.chaseY = player.y; gg.chaseLastD = undefined; gg.chaseStuck = 0; sfx('seen'); }
       }
     }
     if (!sysOff) {
@@ -449,23 +539,58 @@
         }
       }
       // laser grid: crossing a live beam trips the alarm hard — time the gaps or hack it off.
+      // Retest-4 retune: 42/s -> 30/s. A blind crossing of all four beams (up +
+      // down) could still add ~+40, but the typical blind crossing is ~+18 and a
+      // timed crossing (all-clear window) or a hack is ~0 — the grid still punishes
+      // carelessness (standing in a live beam is +40/s at run speed) without
+      // single-handedly busting a clean run the way +42/s did (+52/run in retest 3).
+      // Retest-9 retune (round 8): 30/s -> 26/s and LASER_ON 0.9s -> 0.8s (OFF
+      // window 1.7s -> 1.8s). The vault carpet was the hottest segment of the
+      // clean win (+35 grab leg, +32 return leg in verify run 0, peak 74): the
+      // two live-beam crossings plus the sweeper at the grab point stacked to
+      // ~+67. The grid still punishes a beam-stand hard (sloppy test still busts
+      // in ~6s) — a timed crossing is just a little cheaper.
+      // Retest-12 retune: 26/s -> 30/s. The 26/s beam-stand was net-negative
+      // against the 13/s decay (26*0.31 - 13*0.69 = -0.9/s), so a player
+      // standing on a live beam peaked 84 in 45s and never busted — the grid
+      // stopped punishing carelessness. At 30/s the stand is net-positive and
+      // busts in ~30-40s; the clean win keeps its headroom (peaks 36-46).
       for (var li = 0; li < LASERS.length; li++) {
         var lb = LASERS[li];
         if (laserActive(lb) && laserHitsPlayer(lb)) {
           seenNow = true; if (!seenBy) seenBy = 'LASER';
-          alarm += 42 * speedFactor * dt;
+          alarm += 30 * speedFactor * dt;
           if (tickTimer <= 0) { sfx('laser'); }
         }
       }
       // sweeping laser: standing in the rotating beam trips the alarm too.
+      // Retest-9 retune: 30/s -> 24/s. The grab point (480,365) sits 43px below
+      // the turret, where the beam touches ~35% of its cycle — at 30/s the
+      // grab+return stacked ~+20 from the sweeper alone. 24/s keeps it a real
+      // threat (a careless grab still costs double digits) without dominating
+      // the carpet.
+      // Retest-11 retune: 24/s -> 18/s. The probe log showed the sweeper is
+      // the GHOST run's dominant cost (+22 in one run): the beam sits on the
+      // thief for the whole 1.6s grab-point wait, because the rotating beam
+      // passes over the grab point for ~41% of its 14s cycle. A careful sneak
+      // still pays for lingering at the vault (~+9/s while touching), but the
+      // sweeper no longer single-handedly prices a GHOST out of reach.
+      // Retest-12 retune: 18/s -> 15/s. The GHOST's worst run still peaked 25
+      // (the boundary) with the sweeper as its largest single source on a bad
+      // pass. 15/s keeps a careless grab costly (~+15/s standing, ~+8/s
+      // sneaking) while giving the GHOST a few points of margin.
       if (sweeperHitsPlayer()) {
         seenNow = true; if (!seenBy) seenBy = 'SWEEPER';
-        alarm += 30 * speedFactor * dt;
+        alarm += 15 * speedFactor * dt;
         sweeperHits++;
         if (tickTimer <= 0) { sfx('laser'); }
       }
     }
-    if (!seenNow) alarm -= 11 * dt;
+    // Unseen, the alarm falls: 13/s (was 11/s, round-8 retune) so a brief glimpse
+    // clears quickly once line of sight breaks — breaking contact is the core
+    // stealth skill, and the old decay let one glimpse bleed into the next
+    // exposure on the win route. A sustained sighting (+16-44/s) still busts.
+    if (!seenNow) alarm -= 13 * dt;
     alarm = Math.max(0, Math.min(100, alarm));
     if (alarm > peakAlarm) peakAlarm = alarm;
 
@@ -525,11 +650,11 @@
     alarmFill.style.width = alarm + '%';
     alarmNum.textContent = Math.round(alarm);
     alarmFill.style.background = alarm < 30 ? 'linear-gradient(90deg,#37d67a,#7be495)'
-      : alarm < 65 ? 'linear-gradient(90deg,#ffd94d,#ff9d2e)' : 'linear-gradient(90deg,#ff3b30,#ff7a5c)';
+      : alarm < 75 ? 'linear-gradient(90deg,#ffd94d,#ff9d2e)' : 'linear-gradient(90deg,#ff3b30,#ff7a5c)';
     if (alarmStateEl) {
-      // Escalation stages: QUIET <30%, ALERT 30-64% (cameras + guards speed up),
-      // LOCKDOWN >=65% (red alert, faster lasers, response guard at the exit).
-      var st = alarm < 30 ? ['QUIET', '#4dff9d'] : alarm < 65 ? ['ALERT', '#ffd94d'] : ['LOCKDOWN!', '#ff5a4d'];
+      // Escalation stages: QUIET <30%, ALERT 30-74% (cameras + guards speed up),
+      // LOCKDOWN >=75% (red alert, faster lasers, response guard at the exit).
+      var st = alarm < 30 ? ['QUIET', '#4dff9d'] : alarm < 75 ? ['ALERT', '#ffd94d'] : ['LOCKDOWN!', '#ff5a4d'];
       alarmStateEl.textContent = st[0]; alarmStateEl.style.color = st[1];
     }
     if (goldEl) goldEl.textContent = gold + '/3';
@@ -964,7 +1089,7 @@
       ctx.fillText('E — GRAB THE DIAMOND 💎', player.x, player.y - 30);
     }
     // red edge pulse when alarm high
-    if (alarm >= 65 && state === 'playing') {
+    if (alarm >= 75 && state === 'playing') {
       ctx.strokeStyle = 'rgba(255,59,48,' + (0.25 + 0.35 * Math.sin(time * 6)) + ')';
       ctx.lineWidth = 8; ctx.strokeRect(4, 4, W - 8, H - 8);
     }
@@ -1015,16 +1140,16 @@
   // idle attract state so the start screen still shows a live room behind it
   player = { x: 84, y: 516, r: 19, speed: 175, sneaking: false, face: -Math.PI / 2 };
   guards = [
-    { x: 180, y: 415, r: 14, wp: [{ x: 180, y: 415 }, { x: 180, y: 250 }, { x: 340, y: 250 }, { x: 340, y: 415 }], wi: 1, angle: -Math.PI / 2, speed: 68, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.7 },
-    { x: 820, y: 140, r: 14, wp: [{ x: 820, y: 140 }, { x: 770, y: 280 }, { x: 820, y: 460 }, { x: 860, y: 200 }], wi: 1, angle: Math.PI / 2, speed: 84, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 1.2 },
-    { x: 790, y: 300, r: 14, wp: [{ x: 790, y: 300 }, { x: 860, y: 300 }, { x: 860, y: 400 }, { x: 790, y: 400 }], wi: 1, angle: 0, speed: 76, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.9 },
-    { x: 70, y: 60, r: 14, wp: [{ x: 70, y: 60 }, { x: 140, y: 60 }], wi: 1, angle: 0, speed: 60, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 1.4 }
+    { x: 180, y: 415, r: 14, wp: [{ x: 180, y: 415 }, { x: 180, y: 225 }, { x: 320, y: 225 }, { x: 320, y: 415 }], wi: 1, angle: -Math.PI / 2, speed: 68, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.7 },
+    { x: 820, y: 140, r: 14, wp: [{ x: 820, y: 140 }, { x: 770, y: 280 }, { x: 820, y: 430 }, { x: 860, y: 200 }], wi: 1, angle: Math.PI / 2, speed: 84, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 1.2 },
+    { x: 790, y: 280, r: 14, wp: [{ x: 790, y: 280 }, { x: 790, y: 370 }, { x: 860, y: 370 }, { x: 860, y: 280 }], wi: 1, angle: Math.PI / 2, speed: 76, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.5 },
+    { x: 70, y: 60, r: 14, wp: [{ x: 70, y: 60 }, { x: 140, y: 60 }], wi: 1, angle: 0, speed: 60, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.8 }
   ];
   response = { x: 880, y: 470, r: 14, wp: [{ x: 820, y: 440 }, { x: 900, y: 440 }, { x: 900, y: 500 }, { x: 820, y: 500 }], wi: 1, angle: 0, speed: 96, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.5, dormant: true };
   cameras = [
-    { x: 42, y: 42, base: 0.88, sweep: 0.62, speed: 0.7, phase: 0, angle: 0.88, range: 245, seen: false },
+    { x: 42, y: 42, base: 0.60, sweep: 0.42, speed: 0.7, phase: 3.1, angle: 0.60, range: 210, seen: false },
     { x: 918, y: 42, base: Math.PI - 0.88, sweep: 0.9, speed: 0.45, phase: 2.4, angle: Math.PI - 0.88, range: 240, seen: false },
-    { x: 480, y: 545, base: -Math.PI / 2, sweep: 0.75, speed: 0.55, phase: 1.2, angle: -Math.PI / 2, range: 280, seen: false },
+    { x: 560, y: 545, base: -1.25, sweep: 0.5, speed: 0.8, phase: 1.2, angle: -1.25, range: 180, seen: false },
     { x: 300, y: 558, base: -Math.PI / 2, sweep: 0.5, speed: 0.6, phase: 3.1, angle: -Math.PI / 2, range: 200, seen: false }
   ];
   goldBars = GOLD_SPOTS.map(function (s) { return { x: s.x, y: s.y, taken: false }; });
