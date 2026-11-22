@@ -1,0 +1,98 @@
+/* Midnight Vault — The Aurum Job · Aurum National Bank */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #050914 radial-gradient(900px 500px at 50% -10%, #12224d 0%, #050914 60%);
+  color: #e8ecf5; font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  min-height: 100vh; display: flex; justify-content: center; padding: 12px;
+}
+#wrap { width: 984px; max-width: 100%; }
+#hud {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  background: linear-gradient(180deg, #14224e, #0b1533);
+  border: 2px solid #d4af37; border-bottom: none; border-radius: 12px 12px 0 0;
+  padding: 10px 14px;
+}
+#title { font-size: 20px; font-weight: 900; letter-spacing: 1px; color: #ffd94d; text-shadow: 0 0 12px rgba(255, 217, 77, .45); }
+#title span { font-size: 12px; font-weight: 600; color: #9fb2dd; letter-spacing: 0; text-shadow: none; }
+#objective { font-size: 12.5px; color: #cdd7ef; margin-top: 3px; }
+#objective b { color: #ffd94d; }
+.hud-left { flex: 1 1 300px; min-width: 260px; }
+.hud-mid { flex: 1 1 260px; min-width: 240px; }
+#alarm-label { font-size: 15px; font-weight: 900; letter-spacing: 1px; color: #fff; display: flex; justify-content: space-between; }
+#alarm-num { color: #ffd94d; }
+#alarm-bar {
+  position: relative; height: 22px; margin-top: 4px; border: 2px solid #fff; border-radius: 6px;
+  background: #1a0d0d; overflow: hidden;
+}
+#alarm-fill {
+  height: 100%; width: 0%; background: linear-gradient(90deg, #37d67a, #ffd94d 55%, #ff3b30 85%);
+  transition: width .12s linear;
+}
+#alarm-ticks {
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 47px, rgba(255,255,255,.35) 47px 49px);
+}
+.hud-right { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; min-width: 170px; }
+.hud-right .stat b { color: #ffd94d; }
+#cam-status.off { color: #8d97ad !important; }
+.hud-btns { display: flex; flex-direction: column; gap: 5px; }
+button { cursor: pointer; font-family: inherit; }
+.hud-btns button {
+  background: #1c2c5c; color: #e8ecf5; border: 1px solid #4a5f9e; border-radius: 7px;
+  padding: 4px 10px; font-size: 12.5px; font-weight: 700;
+}
+.hud-btns button:hover { background: #2a3f7d; border-color: #d4af37; }
+
+#stage { position: relative; width: 960px; max-width: 100%; border: 2px solid #d4af37; border-top: 1px solid #d4af37; background: #0a1230; }
+#game { display: block; width: 100%; height: auto; }
+
+.screen {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; text-align: center; padding: 28px;
+  background: rgba(5, 9, 20, .82); backdrop-filter: blur(2px); z-index: 5;
+}
+.screen.hidden { display: none; }
+.screen h1 { font-size: 46px; letter-spacing: 3px; color: #ffd94d; text-shadow: 0 0 24px rgba(255, 217, 77, .6), 0 3px 0 #7a5c00; }
+.screen h1.win { color: #4dff9d; text-shadow: 0 0 24px rgba(77, 255, 157, .6); }
+.screen h1.lose { color: #ff5a4d; text-shadow: 0 0 24px rgba(255, 90, 77, .6); }
+.screen h2 { font-size: 17px; color: #cdd7ef; letter-spacing: 2px; font-weight: 600; }
+.screen .tag { font-size: 15px; color: #ffd94d; font-style: italic; }
+.rules { display: flex; flex-direction: column; gap: 7px; text-align: left; font-size: 14px; line-height: 1.45;
+  background: rgba(20, 34, 78, .85); border: 1px solid #4a5f9e; border-radius: 10px; padding: 14px 18px; max-width: 640px; }
+.rules b { color: #ffd94d; }
+.rules .gold { color: #ffd94d; font-weight: 900; }
+.bigline { font-size: 17px; color: #e8ecf5; }
+.stats { font-size: 15px; color: #ffd94d; font-weight: 700; }
+.hint { font-size: 12.5px; color: #9fb2dd; }
+button.big {
+  background: linear-gradient(180deg, #ffe066, #d4af37); color: #1a1200; border: none; border-radius: 10px;
+  font-size: 20px; font-weight: 900; letter-spacing: 1px; padding: 13px 34px; margin-top: 4px;
+  box-shadow: 0 4px 0 #7a5c00, 0 0 22px rgba(255, 217, 77, .45);
+}
+button.big:hover { filter: brightness(1.08); }
+button.big:active { transform: translateY(3px); box-shadow: 0 1px 0 #7a5c00; }
+
+#toast {
+  position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%);
+  background: rgba(5, 9, 20, .9); color: #ffd94d; border: 1px solid #d4af37; border-radius: 8px;
+  padding: 7px 16px; font-size: 14px; font-weight: 800; letter-spacing: .5px; z-index: 6;
+  opacity: 0; pointer-events: none; transition: opacity .2s; white-space: nowrap;
+}
+#toast.show { opacity: 1; }
+#btn-hack, #btn-grab {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 6;
+  background: linear-gradient(180deg, #ffe066, #d4af37); color: #1a1200; border: none; border-radius: 9px;
+  font-size: 16px; font-weight: 900; padding: 10px 22px; box-shadow: 0 3px 0 #7a5c00, 0 0 18px rgba(255, 217, 77, .5);
+}
+#btn-hack.hidden, #btn-grab.hidden { display: none; }
+#controls {
+  display: flex; gap: 16px; flex-wrap: wrap; background: #0b1533; border: 2px solid #d4af37; border-top: none;
+  border-radius: 0 0 12px 12px; padding: 9px 14px; font-size: 12.5px; color: #9fb2dd;
+}
+#controls b { color: #e8ecf5; }
+#controls .right { margin-left: auto; }
+@media (max-width: 700px) {
+  .screen h1 { font-size: 30px; }
+  .rules { font-size: 12.5px; }
+  #controls .right { margin-left: 0; }
+}

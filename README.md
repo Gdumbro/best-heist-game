@@ -1,9 +1,9 @@
-# Midnight Vault — Meridian Bank Heist
+# Midnight Vault — The Aurum Job
 
 [![make.fun bounty](https://img.shields.io/badge/make.fun-bounty-blue)](https://make.fun/bounties/best-heist-game-20261122-0559)
 [![bounty: best-heist-game-20261122-0559](https://img.shields.io/badge/bounty-best--heist--game--20261122--0559-blue)](https://make.fun/bounties/best-heist-game-20261122-0559)
 
-One night. One vault. No alarms. **Midnight Vault** is a top-down stealth heist game: slip into the Meridian Bank after closing, dodge patrolling guards and security cameras, crack the vault, grab the loot, and get out before dawn — without ever being seen.
+One night. One vault. No alarms. **Midnight Vault** is a top-down stealth heist game: slip into the Aurum National Bank after closing, dodge patrolling guards and security cameras, crack the vault, grab the loot, and get out before dawn — without ever being seen.
 
 ## Controls
 

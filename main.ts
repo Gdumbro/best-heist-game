@@ -1,4 +1,4 @@
-// Midnight Vault — Meridian Bank Heist
+// Midnight Vault — Aurum National Bank Heist
 // make.fun entry point (bounty: best-heist-game-20261122-0559).
 //
 // Contract (Node 22+, stdlib only, no network):
@@ -38,13 +38,13 @@ if (existsSync(screenshotsDir)) {
   console.error(`Warning: no screenshots/ directory found at ${screenshotsDir}`);
 }
 
-const dossier = await buildDossier(repoRoot, outputDir, {
+const dossier = buildDossier(outputDir, {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
   game_max_files: 993,
   game_max_bytes: 50331648,
 });
 
-writeFileSync(join(outputDir, "dossier.json"), JSON.stringify(dossier, null, 2) + "\n", "utf8");
+writeFileSync(join(outputDir, "dossier.json"), dossier);
 
 console.log(`Midnight Vault packaged OK -> ${outputDir} (dossier.json written)`);

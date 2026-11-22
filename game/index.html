@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Midnight Vault — The Aurum Job</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="wrap">
+  <header id="hud">
+    <div class="hud-left">
+      <div id="title">MIDNIGHT VAULT <span>— The Aurum Job</span></div>
+      <div id="objective">Objective: reach the vault, grab the <b>DIAMOND</b>, then escape through the EXIT.</div>
+    </div>
+    <div class="hud-mid">
+      <div id="alarm-label">🚨 ALARM <span id="alarm-num">0</span>%</div>
+      <div id="alarm-bar"><div id="alarm-fill"></div><div id="alarm-ticks"></div></div>
+    </div>
+    <div class="hud-right">
+      <div class="stat">💎 Diamond: <b id="loot">—</b></div>
+      <div class="stat">📷 Cameras: <b id="cam-status">ONLINE</b></div>
+      <div class="stat">⏱ Time: <b id="timer">0:00</b></div>
+    </div>
+    <div class="hud-btns">
+      <button id="btn-mute" type="button" title="Mute / unmute sound (M)">🔊 Sound</button>
+      <button id="btn-pause" type="button" title="Pause (P / Esc)">⏸ Pause</button>
+      <button id="btn-restart" type="button" title="Restart (R)">↻ Restart</button>
+    </div>
+  </header>
+
+  <div id="stage">
+    <canvas id="game" width="960" height="600"></canvas>
+
+    <div id="screen-start" class="screen">
+      <h1>MIDNIGHT VAULT</h1>
+      <h2>The Aurum Job &nbsp;·&nbsp; Aurum National Bank</h2>
+      <p class="tag">One thief. One diamond. Two guards, two cameras, one very loud alarm.</p>
+      <div class="rules">
+        <div><b>🎯 Goal</b> — Cross the vault hall, grab the <span class="gold">DIAMOND</span> from the central vault, then reach the green <b>EXIT</b> door.</div>
+        <div><b>🕹 Move</b> — WASD / Arrow keys &nbsp;·&nbsp; <b>Shift</b> sneak (slower, alarm rises half as fast)</div>
+        <div><b>✋ Interact</b> — <b>E</b> near the vault to grab the diamond · <b>E</b> near the terminal to hack the cameras</div>
+        <div><b>👁 Guards</b> — Yellow cones are their vision. Seen = alarm rockets up &amp; they chase you.</div>
+        <div><b>📷 Cameras</b> — Red cones sweep the hall. Hack the terminal to switch both cameras <b>OFF for 8s</b>.</div>
+        <div><b>🚨 Alarm</b> — At 100% you are <b>BUSTED</b>. Hide behind desks &amp; pillars to let it fall.</div>
+      </div>
+      <button id="btn-start" class="big" type="button">▶ &nbsp;START THE HEIST</button>
+      <p class="hint">P / Esc pause · R restart · M mute · Click buttons or use the keyboard.</p>
+    </div>
+
+    <div id="screen-win" class="screen hidden">
+      <h1 class="win">💎 CLEAN GETAWAY!</h1>
+      <p class="bigline">You slipped out of Aurum National Bank with the diamond.</p>
+      <p id="win-stats" class="stats"></p>
+      <button id="btn-again-win" class="big" type="button">↻ &nbsp;PLAY AGAIN</button>
+    </div>
+
+    <div id="screen-lose" class="screen hidden">
+      <h1 class="lose">🚨 BUSTED!</h1>
+      <p class="bigline">The alarm hit 100% — the vault hall is swarming with security.</p>
+      <p id="lose-stats" class="stats"></p>
+      <button id="btn-again-lose" class="big" type="button">↻ &nbsp;TRY AGAIN</button>
+    </div>
+
+    <div id="screen-pause" class="screen hidden">
+      <h1>⏸ PAUSED</h1>
+      <p class="bigline">The heist is on hold. The guards wait for no one… except now.</p>
+      <button id="btn-resume" class="big" type="button">▶ &nbsp;RESUME</button>
+    </div>
+
+    <div id="toast"></div>
+    <button id="btn-hack" class="hidden" type="button">⌨ HACK CAMERAS (E)</button>
+    <button id="btn-grab" class="hidden" type="button">💎 GRAB DIAMOND (E)</button>
+  </div>
+
+  <footer id="controls">
+    <span><b>WASD / ←↑↓→</b> move</span><span><b>Shift</b> sneak</span><span><b>E</b> grab / hack</span>
+    <span><b>P</b> pause</span><span><b>R</b> restart</span><span><b>M</b> mute</span>
+    <span class="right">Aurum National Bank · after hours · no network, no downloads — everything runs offline.</span>
+  </footer>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
