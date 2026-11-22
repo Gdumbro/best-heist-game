@@ -18,11 +18,13 @@ body {
 #objective b { color: #ffd94d; }
 .hud-left { flex: 1 1 300px; min-width: 260px; }
 .hud-mid { flex: 1 1 260px; min-width: 240px; }
-#alarm-label { font-size: 15px; font-weight: 900; letter-spacing: 1px; color: #fff; display: flex; justify-content: space-between; }
+#alarm-label { font-size: 17px; font-weight: 900; letter-spacing: 1px; color: #fff; display: flex; justify-content: space-between; }
 #alarm-num { color: #ffd94d; }
+#alarm-state { font-size: 13px; letter-spacing: 2px; border: 1px solid #4a5f9e; border-radius: 5px; padding: 1px 8px; }
 #alarm-bar {
-  position: relative; height: 22px; margin-top: 4px; border: 2px solid #fff; border-radius: 6px;
-  background: #1a0d0d; overflow: hidden;
+  position: relative; height: 28px; margin-top: 5px; border: 3px solid #d4af37; border-radius: 8px;
+  background: linear-gradient(180deg, #3a0d0d, #1a0d0d); overflow: hidden;
+  box-shadow: 0 0 10px rgba(255, 217, 77, .25);
 }
 #alarm-fill {
   height: 100%; width: 0%; background: linear-gradient(90deg, #37d67a, #ffd94d 55%, #ff3b30 85%);
@@ -51,6 +53,9 @@ button { cursor: pointer; font-family: inherit; }
   gap: 12px; text-align: center; padding: 28px;
   background: rgba(5, 9, 20, .82); backdrop-filter: blur(2px); z-index: 5;
 }
+/* Win overlay stays light (~40% dim) so the vault hall stays visible behind the getaway text */
+#screen-win { background: rgba(5, 9, 20, .42); backdrop-filter: blur(1px); text-shadow: 0 2px 8px rgba(0, 0, 0, .9); }
+#screen-win .bigline, #screen-win .stats, #screen-win .rating { text-shadow: 0 2px 8px rgba(0, 0, 0, .95); }
 .screen.hidden { display: none; }
 .screen h1 { font-size: 46px; letter-spacing: 3px; color: #ffd94d; text-shadow: 0 0 24px rgba(255, 217, 77, .6), 0 3px 0 #7a5c00; }
 .screen h1.win { color: #4dff9d; text-shadow: 0 0 24px rgba(77, 255, 157, .6); }
@@ -63,6 +68,8 @@ button { cursor: pointer; font-family: inherit; }
 .rules .gold { color: #ffd94d; font-weight: 900; }
 .bigline { font-size: 17px; color: #e8ecf5; }
 .stats { font-size: 15px; color: #ffd94d; font-weight: 700; }
+.rating { font-size: 19px; font-weight: 900; letter-spacing: 1px; }
+.dim { color: #9fb2dd; font-size: 11.5px; font-weight: 400; }
 .hint { font-size: 12.5px; color: #9fb2dd; }
 button.big {
   background: linear-gradient(180deg, #ffe066, #d4af37); color: #1a1200; border: none; border-radius: 10px;

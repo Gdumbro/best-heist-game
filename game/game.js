@@ -12,13 +12,15 @@
   var $ = function (id) { return document.getElementById(id); };
   var alarmFill = $('alarm-fill'), alarmNum = $('alarm-num'), lootEl = $('loot'),
       camEl = $('cam-status'), timerEl = $('timer'), objectiveEl = $('objective'),
-      toastEl = $('toast'), btnHack = $('btn-hack'), btnGrab = $('btn-grab');
+      toastEl = $('toast'), btnHack = $('btn-hack'), btnGrab = $('btn-grab'),
+      goldEl = $('gold'), alarmStateEl = $('alarm-state'), winRatingEl = $('win-rating');
 
   /* ---------------- level layout (fixed, deterministic) ---------------- */
   var VAULT = { x: 400, y: 200, w: 160, h: 120 };
   var DIAMOND = { x: 480, y: 260 };
   var EXIT = { x: 872, y: 512, w: 56, h: 56 };
-  var TERMINAL = { x: 20, y: 262, w: 22, h: 48, cx: 44, cy: 286 };
+  var TERMINAL = { x: 36, y: 262, w: 22, h: 48, cx: 60, cy: 286 };
+  var GOLD_SPOTS = [{ x: 300, y: 88 }, { x: 660, y: 88 }, { x: 890, y: 300 }];
   var OBSTACLES = [
     VAULT,
     { x: 180, y: 120, w: 140, h: 46 },   // desk top-left
@@ -28,12 +30,16 @@
     { x: 350, y: 120, w: 36, h: 36 },    // pillar top-left
     { x: 574, y: 120, w: 36, h: 36 },    // pillar top-right
     { x: 350, y: 444, w: 36, h: 36 },    // pillar bottom-left
-    { x: 574, y: 444, w: 36, h: 36 }     // pillar bottom-right
+    { x: 574, y: 444, w: 36, h: 36 },    // pillar bottom-right
+    { x: 200, y: 300, w: 120, h: 60, kind: 'case' },  // glass display case (gold pile)
+    { x: 640, y: 300, w: 120, h: 60, kind: 'case' }   // glass display case (gold pile)
   ];
 
   /* ---------------- state ---------------- */
   var state = 'start';           // start | playing | paused | win | lose
   var alarm = 0, loot = false, elapsed = 0, muted = false;
+  var gold = 0, goldBars = [];   // optional secondary loot: 3 gold bars, +150 each
+  var peakAlarm = 0;             // highest alarm reached this run (drives the end rating)
   var camerasOffUntil = -1, seenNow = false, seenBy = '', chaseFlash = 0;
   var toastTimer = 0, tickTimer = 0, time = 0;   // time = deterministic clock (seconds)
   var player, guards, cameras;
@@ -41,16 +47,24 @@
   function resetGame() {
     state = 'playing'; alarm = 0; loot = false; elapsed = 0; time = 0;
     camerasOffUntil = -1; seenNow = false; seenBy = ''; toastTimer = 0;
-    player = { x: 84, y: 516, r: 14, speed: 175, sneaking: false, face: -Math.PI / 2 };
+    gold = 0; peakAlarm = 0;
+    goldBars = GOLD_SPOTS.map(function (s) { return { x: s.x, y: s.y, taken: false }; });
+    player = { x: 84, y: 516, r: 19, speed: 175, sneaking: false, face: -Math.PI / 2 };
     guards = [
-      { x: 250, y: 370, r: 14, wp: [{ x: 250, y: 370 }, { x: 710, y: 370 }], wi: 1,
-        angle: 0, speed: 68, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0 },
-      { x: 820, y: 140, r: 14, wp: [{ x: 820, y: 140 }, { x: 820, y: 460 }], wi: 1,
-        angle: Math.PI / 2, speed: 62, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0 }
+      // Guard 1: slow rectangular loop down the left hall, run COUNTER-CLOCKWISE
+      // (left leg faces up the wall, bottom leg faces left) so its cone never covers
+      // the vault approach; the left leg sits at x=180, clear of the display case
+      // and far enough from the left wall that a climbing thief is only briefly seen
+      { x: 180, y: 415, r: 14, wp: [{ x: 180, y: 415 }, { x: 180, y: 250 }, { x: 360, y: 250 }, { x: 380, y: 415 }], wi: 1,
+        angle: -Math.PI / 2, speed: 68, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.7 },
+      // Guard 2: faster diamond loop on the right side, longer look-around pauses.
+      // Its lower waypoint sits up the right wall, clear of the gold bar below it.
+      { x: 820, y: 140, r: 14, wp: [{ x: 820, y: 140 }, { x: 770, y: 280 }, { x: 820, y: 460 }, { x: 860, y: 200 }], wi: 1,
+        angle: Math.PI / 2, speed: 84, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 1.2 }
     ];
     cameras = [
-      { x: 42, y: 42, base: 0.88, sweep: 0.62, phase: 0, angle: 0.88, range: 245, seen: false },
-      { x: 918, y: 42, base: Math.PI - 0.88, sweep: 0.62, phase: 1.7, angle: Math.PI - 0.88, range: 245, seen: false }
+      { x: 42, y: 42, base: 0.88, sweep: 0.62, speed: 0.7, phase: 0, angle: 0.88, range: 245, seen: false },
+      { x: 918, y: 42, base: Math.PI - 0.88, sweep: 0.9, speed: 0.45, phase: 2.4, angle: Math.PI - 0.88, range: 265, seen: false }
     ];
     updateHUD();
     showScreen(null);
@@ -172,7 +186,7 @@
   }
 
   /* ---------------- interact ---------------- */
-  function nearVault() { return dist(player.x, player.y, DIAMOND.x, DIAMOND.y) < 100; }
+  function nearVault() { return dist(player.x, player.y, DIAMOND.x, DIAMOND.y) < 110; }
   function nearTerminal() { return dist(player.x, player.y, TERMINAL.cx, TERMINAL.cy) < 85; }
   function interact() {
     if (nearVault() && !loot) {
@@ -210,11 +224,11 @@
       moveCircle(player, mx / len * sp * dt, my / len * sp * dt);
     }
 
-    // cameras sweep (deterministic, driven by `time`)
+    // cameras sweep (deterministic, driven by `time`; each camera has its own speed)
     var camsOff = camerasOffUntil > time;
     for (var i = 0; i < cameras.length; i++) {
       var c = cameras[i];
-      c.angle = c.base + Math.sin(time * 0.7 + c.phase) * c.sweep;
+      c.angle = c.base + Math.sin(time * c.speed + c.phase) * c.sweep;
       c.seen = false;
     }
 
@@ -230,7 +244,7 @@
       } else {
         var tgt = gd.wp[gd.wi];
         var d = dist(gd.x, gd.y, tgt.x, tgt.y);
-        if (d < 6) { gd.wi = (gd.wi + 1) % gd.wp.length; gd.pause = 0.7; }
+        if (d < 6) { gd.wi = (gd.wi + 1) % gd.wp.length; gd.pause = gd.pauseDur || 0.7; }
         else if (gd.pause > 0) { gd.pause -= dt; }
         else {
           var a = Math.atan2(tgt.y - gd.y, tgt.x - gd.x);
@@ -267,6 +281,17 @@
     }
     if (!seenNow) alarm -= 9 * dt;
     alarm = Math.max(0, Math.min(100, alarm));
+    if (alarm > peakAlarm) peakAlarm = alarm;
+
+    // optional secondary loot: walk over a gold bar to pocket it (+150 score each)
+    for (var bi = 0; bi < goldBars.length; bi++) {
+      var bar = goldBars[bi];
+      if (!bar.taken && dist(player.x, player.y, bar.x, bar.y) < 34) {
+        bar.taken = true; gold += 1; sfx('pickup');
+        toast('🟨 GOLD BAR secured! +' + 150 + ' — ' + gold + '/3 bars (optional loot)');
+        updateHUD();
+      }
+    }
     if (seenNow) {
       tickTimer -= dt;
       if (tickTimer <= 0) { sfx('tick'); tickTimer = 0.45; }
@@ -277,7 +302,11 @@
     if (loot && player.x + player.r > EXIT.x && player.x - player.r < EXIT.x + EXIT.w &&
         player.y + player.r > EXIT.y && player.y - player.r < EXIT.y + EXIT.h) {
       state = 'win'; sfx('win');
-      $('win-stats').textContent = 'Time ' + fmtTime(elapsed) + '  ·  Final alarm ' + Math.round(alarm) + '%  ·  Diamond secured 💎';
+      var rating = endRating();
+      var score = (loot ? 1000 : 0) + gold * 150;
+      winRatingEl.textContent = '★ RATING: ' + rating.name + ' — ' + rating.blurb + ' ★';
+      winRatingEl.style.color = rating.color;
+      $('win-stats').textContent = 'Time ' + fmtTime(elapsed) + '  ·  Peak alarm ' + Math.round(peakAlarm) + '%  ·  Diamond secured 💎  ·  Gold bars ' + gold + '/3  ·  Score ' + score;
       showScreen('screen-win'); updateHUD(); return;
     }
     if (alarm >= 100) {
@@ -290,11 +319,23 @@
 
   function fmtTime(s) { var m = Math.floor(s / 60), ss = Math.floor(s % 60); return m + ':' + (ss < 10 ? '0' : '') + ss; }
 
+  // End rating from the peak alarm of the run: GHOST = barely noticed, SHADOW = seen but quiet, LOUD = alarms everywhere.
+  function endRating() {
+    if (peakAlarm < 25) return { name: 'GHOST', blurb: 'nobody ever knew you were there', color: '#4dff9d' };
+    if (peakAlarm < 60) return { name: 'SHADOW', blurb: 'spotted once or twice, but you slipped away', color: '#ffd94d' };
+    return { name: 'LOUD', blurb: 'the whole bank heard you — but you still got out', color: '#ff8a80' };
+  }
+
   function updateHUD() {
     alarmFill.style.width = alarm + '%';
     alarmNum.textContent = Math.round(alarm);
     alarmFill.style.background = alarm < 35 ? 'linear-gradient(90deg,#37d67a,#7be495)'
       : alarm < 70 ? 'linear-gradient(90deg,#ffd94d,#ff9d2e)' : 'linear-gradient(90deg,#ff3b30,#ff7a5c)';
+    if (alarmStateEl) {
+      var st = alarm < 35 ? ['QUIET', '#4dff9d'] : alarm < 70 ? ['RISKY', '#ffd94d'] : ['LOUD!', '#ff5a4d'];
+      alarmStateEl.textContent = st[0]; alarmStateEl.style.color = st[1];
+    }
+    if (goldEl) goldEl.textContent = gold + '/3';
     lootEl.textContent = loot ? '✦ SECURED' : '—';
     lootEl.style.color = loot ? '#4dff9d' : '';
     var camsOff = camerasOffUntil > time;
@@ -321,21 +362,50 @@
     ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
     ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
   }
+  function lightPool(x, y, rad, color) {
+    var g = ctx.createRadialGradient(x, y, 8, x, y, rad);
+    g.addColorStop(0, color); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  function velvetRope(x1, y1, x2, y2, sag) {
+    // gold posts at both ends + a sagging red rope between them
+    ctx.fillStyle = '#d4af37';
+    ctx.beginPath(); ctx.arc(x1, y1, 5, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(x2, y2, 5, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#a11c2c'; ctx.lineWidth = 5; ctx.beginPath();
+    ctx.moveTo(x1, y1); ctx.quadraticCurveTo((x1 + x2) / 2, (y1 + y2) / 2 + sag, x2, y2); ctx.stroke();
+    ctx.strokeStyle = '#ff5a6e'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.moveTo(x1, y1); ctx.quadraticCurveTo((x1 + x2) / 2, (y1 + y2) / 2 + sag, x2, y2); ctx.stroke();
+  }
 
   function render() {
-    // floor
+    // marble floor: dark navy tiles with a faint grid, so the hall reads as a bank floor
     ctx.fillStyle = '#0d1734'; ctx.fillRect(0, 0, W, H);
     ctx.strokeStyle = 'rgba(120,150,220,0.10)'; ctx.lineWidth = 1;
     for (var gx = WALL; gx < W; gx += 60) { ctx.beginPath(); ctx.moveTo(gx, WALL); ctx.lineTo(gx, H - WALL); ctx.stroke(); }
     for (var gy = WALL; gy < H; gy += 60) { ctx.beginPath(); ctx.moveTo(WALL, gy); ctx.lineTo(W - WALL, gy); ctx.stroke(); }
-    // gold carpet runner down the middle
-    ctx.fillStyle = 'rgba(212,175,55,0.10)'; ctx.fillRect(430, WALL, 100, H - 2 * WALL);
-    ctx.fillStyle = 'rgba(212,175,55,0.25)'; ctx.fillRect(428, WALL, 2, H - 2 * WALL); ctx.fillRect(530, WALL, 2, H - 2 * WALL);
+    // warm light pools: the vault glows gold, entrance and exit glow green
+    lightPool(480, 260, 300, 'rgba(255,200,80,0.13)');
+    lightPool(84, 516, 190, 'rgba(120,255,170,0.07)');
+    lightPool(900, 540, 170, 'rgba(120,255,170,0.08)');
+    lightPool(260, 330, 150, 'rgba(255,200,80,0.06)');
+    lightPool(700, 330, 150, 'rgba(255,200,80,0.06)');
+    // red carpet runner down the middle, gold-edged, leading straight to the vault
+    ctx.fillStyle = 'rgba(158,28,44,0.42)'; ctx.fillRect(440, WALL, 80, H - 2 * WALL);
+    ctx.fillStyle = '#d4af37'; ctx.fillRect(438, WALL, 3, H - 2 * WALL); ctx.fillRect(519, WALL, 3, H - 2 * WALL);
+    ctx.strokeStyle = 'rgba(255,217,77,0.55)'; ctx.setLineDash([10, 14]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(480, WALL + 8); ctx.lineTo(480, H - WALL - 8); ctx.stroke(); ctx.setLineDash([]);
+    // velvet ropes strung between the pillars, top and bottom of the hall
+    velvetRope(386, 138, 574, 138, 26);
+    velvetRope(386, 462, 574, 462, -26);
 
-    // patrol paths (faint dotted)
+    // patrol paths (faint dotted loops through each guard's waypoints)
     ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.setLineDash([4, 8]); ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(250, 370); ctx.lineTo(710, 370); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(820, 140); ctx.lineTo(820, 460); ctx.stroke();
+    guards.forEach(function (gd) {
+      ctx.beginPath();
+      gd.wp.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.closePath(); ctx.stroke();
+    });
     ctx.setLineDash([]);
 
     // vision cones (under obstacles, so walls block them visually)
@@ -365,19 +435,38 @@
     ctx.font = '700 10px "Segoe UI", Arial';
     ctx.fillText(loot ? 'OPEN →' : 'LOCKED', EXIT.x + 28, EXIT.y + 42);
 
-    // terminal (wall-mounted, left wall)
+    // terminal (wall-mounted, left wall — moved in from the edge, label on a solid pill)
     ctx.fillStyle = '#0e2a3a'; rr(TERMINAL.x, TERMINAL.y, TERMINAL.w, TERMINAL.h, 4); ctx.fill();
     ctx.strokeStyle = camsOff ? '#8d97ad' : '#35e0ff'; ctx.lineWidth = 2; rr(TERMINAL.x, TERMINAL.y, TERMINAL.w, TERMINAL.h, 4); ctx.stroke();
-    ctx.fillStyle = camsOff ? '#8d97ad' : '#35e0ff'; ctx.font = '900 9px "Segoe UI", Arial'; ctx.textAlign = 'left';
-    ctx.fillText('HACK', TERMINAL.x + 26, TERMINAL.cy + 3);
+    ctx.fillStyle = 'rgba(5,9,20,0.88)'; rr(TERMINAL.x + 26, TERMINAL.cy - 11, 62, 22, 6); ctx.fill();
+    ctx.strokeStyle = camsOff ? '#8d97ad' : '#35e0ff'; ctx.lineWidth = 1.5; rr(TERMINAL.x + 26, TERMINAL.cy - 11, 62, 22, 6); ctx.stroke();
+    ctx.fillStyle = camsOff ? '#8d97ad' : '#35e0ff'; ctx.font = '900 11px "Segoe UI", Arial'; ctx.textAlign = 'left';
+    ctx.fillText('⌨ HACK', TERMINAL.x + 32, TERMINAL.cy + 4);
     if (nearTerminal() && state === 'playing') {
       ctx.fillStyle = '#35e0ff'; ctx.font = '900 12px "Segoe UI", Arial';
-      ctx.fillText(camsOff ? 'CAMERAS OFF ' + Math.ceil(camerasOffUntil - time) + 's' : 'E — HACK CAMERAS', TERMINAL.x + 52, TERMINAL.cy + 4);
+      ctx.fillText(camsOff ? 'CAMERAS OFF ' + Math.ceil(camerasOffUntil - time) + 's' : 'E — HACK CAMERAS', TERMINAL.x + 96, TERMINAL.cy + 4);
     }
 
-    // desks + pillars
+    // desks + pillars + glass display cases (gold piles inside, worth a look on the way past)
     OBSTACLES.forEach(function (o) {
       if (o === VAULT) return;
+      if (o.kind === 'case') {
+        ctx.save();
+        ctx.shadowColor = '#ffd94d'; ctx.shadowBlur = 10;
+        ctx.fillStyle = '#20294a'; rr(o.x, o.y, o.w, o.h, 8); ctx.fill();
+        ctx.restore();
+        ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 2.5; rr(o.x, o.y, o.w, o.h, 8); ctx.stroke();
+        ctx.fillStyle = 'rgba(160,210,255,0.16)'; rr(o.x + 6, o.y + 6, o.w - 12, o.h - 12, 5); ctx.fill();
+        // gold pile inside the case: stacked coins + a small bar
+        ctx.fillStyle = '#ffd94d';
+        [0, 1, 2].forEach(function (k) { ctx.beginPath(); ctx.arc(o.x + 30 + k * 12, o.y + 40, 8, 0, 7); ctx.fill(); });
+        ctx.beginPath(); ctx.arc(o.x + 36, o.y + 28, 8, 0, 7); ctx.fill();
+        ctx.fillStyle = '#f5c542'; ctx.fillRect(o.x + 78, o.y + 30, 30, 12);
+        ctx.strokeStyle = '#fff2b0'; ctx.lineWidth = 1; ctx.strokeRect(o.x + 78, o.y + 30, 30, 12);
+        ctx.fillStyle = '#9fb2dd'; ctx.font = '900 10px "Segoe UI", Arial'; ctx.textAlign = 'center';
+        ctx.fillText('GOLD DISPLAY', o.x + o.w / 2, o.y + 14);
+        return;
+      }
       var isPillar = o.w === 36;
       ctx.fillStyle = isPillar ? '#1b2a55' : '#3a2a18';
       rr(o.x, o.y, o.w, o.h, isPillar ? 6 : 5); ctx.fill();
@@ -417,6 +506,22 @@
       ctx.fillText('◆ DIAMOND ◆', DIAMOND.x, DIAMOND.y - 30);
     }
 
+    // optional gold bars — glowing, labelled, free to grab on the way past
+    goldBars.forEach(function (bar) {
+      if (bar.taken) return;
+      var bp = 1 + Math.sin(time * 3 + bar.x) * 0.1;
+      ctx.save();
+      ctx.translate(bar.x, bar.y); ctx.scale(bp, bp);
+      ctx.shadowColor = '#ffd94d'; ctx.shadowBlur = 16;
+      ctx.fillStyle = '#f5c542';
+      ctx.beginPath();
+      ctx.moveTo(-14, 6); ctx.lineTo(-10, -6); ctx.lineTo(10, -6); ctx.lineTo(14, 6); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#fff2b0'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#ffd94d'; ctx.font = '900 11px "Segoe UI", Arial'; ctx.textAlign = 'center';
+      ctx.fillText('GOLD +150', bar.x, bar.y - 16);
+    });
+
     // cameras (wall mounts)
     for (var c2 = 0; c2 < cameras.length; c2++) {
       var cam = cameras[c2];
@@ -447,21 +552,32 @@
       if (gd.seen) { ctx.fillStyle = '#ff3b30'; ctx.font = '900 20px "Segoe UI", Arial'; ctx.fillText('!', gd.x, gd.y - gd.r - 20); }
     }
 
-    // player — thief in black hoodie with gold trim
+    // player — big thief in a black hoodie with a gold glow, readable at thumbnail size
     ctx.save(); ctx.translate(player.x, player.y);
     if (player.sneaking) { ctx.globalAlpha = 0.85; }
-    ctx.shadowColor = '#ffd94d'; ctx.shadowBlur = 10;
+    // pulsing gold halo so the thief pops against the dark floor
+    var halo = 1 + Math.sin(time * 4) * 0.08;
+    ctx.save(); ctx.scale(halo, halo);
+    ctx.strokeStyle = 'rgba(255,217,77,0.55)'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(0, 0, player.r + 6, 0, 7); ctx.stroke();
+    ctx.restore();
+    ctx.shadowColor = '#ffd94d'; ctx.shadowBlur = 22;
     ctx.fillStyle = '#14141c'; ctx.beginPath(); ctx.arc(0, 0, player.r, 0, 7); ctx.fill();
     ctx.restore();
-    ctx.strokeStyle = '#ffd94d'; ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#ffd94d'; ctx.lineWidth = 3.5;
     ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, 7); ctx.stroke();
+    ctx.strokeStyle = '#fff2b0'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r - 4, 0, 7); ctx.stroke();
     // hood + eyes facing direction
     var fx = Math.cos(player.face), fy = Math.sin(player.face);
     ctx.fillStyle = '#ffd94d';
     ctx.beginPath(); ctx.arc(player.x + fx * 6 - fy * 5, player.y + fy * 6 + fx * 5, 2.2, 0, 7); ctx.fill();
     ctx.beginPath(); ctx.arc(player.x + fx * 6 + fy * 5, player.y + fy * 6 - fx * 5, 2.2, 0, 7); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.font = '900 11px "Segoe UI", Arial'; ctx.textAlign = 'center';
-    ctx.fillText(player.sneaking ? 'THIEF · SNEAKING' : 'THIEF', player.x, player.y - player.r - 8);
+    var thiefLabel = player.sneaking ? 'THIEF · SNEAKING' : '★ THIEF ★';
+    ctx.fillStyle = 'rgba(5,9,20,0.85)';
+    rr(player.x - 52, player.y - player.r - 26, 104, 18, 5); ctx.fill();
+    ctx.fillStyle = '#ffd94d'; ctx.font = '900 12px "Segoe UI", Arial'; ctx.textAlign = 'center';
+    ctx.fillText(thiefLabel, player.x, player.y - player.r - 13);
 
     // entrance marker (inside the playfield, just above the bottom wall)
     ctx.fillStyle = '#4dff9d'; ctx.font = '900 11px "Segoe UI", Arial'; ctx.textAlign = 'left';
@@ -502,11 +618,14 @@
   /* ---------------- debug hook (read-only snapshot, updated every frame) ---------------- */
   window.__heist = {
     state: 'start', alarm: 0, loot: false,
-    player: { x: 84, y: 516 }, guards: [], cameras: [], camerasOff: false, elapsed: 0
+    player: { x: 84, y: 516 }, guards: [], cameras: [], camerasOff: false, elapsed: 0,
+    gold: 0, goldTotal: 3, peakAlarm: 0, rating: ''
   };
   function syncDebug() {
     window.__heist.state = state; window.__heist.alarm = alarm; window.__heist.loot = loot;
     window.__heist.elapsed = elapsed; window.__heist.camerasOff = camerasOffUntil > time;
+    window.__heist.gold = gold; window.__heist.peakAlarm = peakAlarm;
+    window.__heist.rating = state === 'win' ? endRating().name : '';
     if (player) { window.__heist.player.x = player.x; window.__heist.player.y = player.y; }
     window.__heist.guards = guards ? guards.map(function (g) {
       return { x: Math.round(g.x), y: Math.round(g.y), seen: g.seen, chase: g.chase > 0 };
@@ -518,15 +637,16 @@
 
   /* ---------------- main loop ---------------- */
   // idle attract state so the start screen still shows a live room behind it
-  player = { x: 84, y: 516, r: 14, speed: 175, sneaking: false, face: -Math.PI / 2 };
+  player = { x: 84, y: 516, r: 19, speed: 175, sneaking: false, face: -Math.PI / 2 };
   guards = [
-    { x: 250, y: 370, r: 14, wp: [{ x: 250, y: 370 }, { x: 710, y: 370 }], wi: 1, angle: 0, speed: 68, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0 },
-    { x: 820, y: 140, r: 14, wp: [{ x: 820, y: 140 }, { x: 820, y: 460 }], wi: 1, angle: Math.PI / 2, speed: 62, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0 }
+    { x: 180, y: 415, r: 14, wp: [{ x: 180, y: 415 }, { x: 180, y: 250 }, { x: 360, y: 250 }, { x: 380, y: 415 }], wi: 1, angle: -Math.PI / 2, speed: 68, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.7 },
+    { x: 820, y: 140, r: 14, wp: [{ x: 820, y: 140 }, { x: 770, y: 280 }, { x: 820, y: 460 }, { x: 860, y: 200 }], wi: 1, angle: Math.PI / 2, speed: 84, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 1.2 }
   ];
   cameras = [
-    { x: 42, y: 42, base: 0.88, sweep: 0.62, phase: 0, angle: 0.88, range: 245, seen: false },
-    { x: 918, y: 42, base: Math.PI - 0.88, sweep: 0.62, phase: 1.7, angle: Math.PI - 0.88, range: 245, seen: false }
+    { x: 42, y: 42, base: 0.88, sweep: 0.62, speed: 0.7, phase: 0, angle: 0.88, range: 245, seen: false },
+    { x: 918, y: 42, base: Math.PI - 0.88, sweep: 0.9, speed: 0.45, phase: 2.4, angle: Math.PI - 0.88, range: 265, seen: false }
   ];
+  goldBars = GOLD_SPOTS.map(function (s) { return { x: s.x, y: s.y, taken: false }; });
   // autostart for screenshots / headless testing: ?autostart=1
   if (/[?&]autostart=1/.test(window.location.search)) { resetGame(); }
 
@@ -537,7 +657,7 @@
     else {
       // idle animation behind start/pause/win/lose screens: sweep cameras only
       time += dt;
-      for (var i = 0; i < cameras.length; i++) cameras[i].angle = cameras[i].base + Math.sin(time * 0.7 + cameras[i].phase) * cameras[i].sweep;
+      for (var i = 0; i < cameras.length; i++) cameras[i].angle = cameras[i].base + Math.sin(time * cameras[i].speed + cameras[i].phase) * cameras[i].sweep;
       if (state === 'start') { /* guards hold still on the start frame for a clean screenshot */ }
     }
     render(); syncDebug();

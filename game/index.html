@@ -14,11 +14,12 @@
       <div id="objective">Objective: reach the vault, grab the <b>DIAMOND</b>, then escape through the EXIT.</div>
     </div>
     <div class="hud-mid">
-      <div id="alarm-label">🚨 ALARM <span id="alarm-num">0</span>%</div>
+      <div id="alarm-label">🚨 ALARM <span id="alarm-state">QUIET</span> <span id="alarm-num">0</span>%</div>
       <div id="alarm-bar"><div id="alarm-fill"></div><div id="alarm-ticks"></div></div>
     </div>
     <div class="hud-right">
       <div class="stat">💎 Diamond: <b id="loot">—</b></div>
+      <div class="stat">🟨 Gold bars: <b id="gold">0/3</b> <span class="dim">(+150 each, optional)</span></div>
       <div class="stat">📷 Cameras: <b id="cam-status">ONLINE</b></div>
       <div class="stat">⏱ Time: <b id="timer">0:00</b></div>
     </div>
@@ -42,6 +43,8 @@
         <div><b>✋ Interact</b> — <b>E</b> near the vault to grab the diamond · <b>E</b> near the terminal to hack the cameras</div>
         <div><b>👁 Guards</b> — Yellow cones are their vision. Seen = alarm rockets up &amp; they chase you.</div>
         <div><b>📷 Cameras</b> — Red cones sweep the hall. Hack the terminal to switch both cameras <b>OFF for 8s</b>.</div>
+        <div><b>🟨 Bonus loot</b> — Three <span class="gold">GOLD BARS</span> are hidden around the hall (+150 score each). Grabbing them is optional — but risky.</div>
+        <div><b>🏆 Rating</b> — Your getaway is rated on your peak alarm: <b>GHOST</b> (under 25%), <b>SHADOW</b> (under 60%), or <b>LOUD</b>.</div>
         <div><b>🚨 Alarm</b> — At 100% you are <b>BUSTED</b>. Hide behind desks &amp; pillars to let it fall.</div>
       </div>
       <button id="btn-start" class="big" type="button">▶ &nbsp;START THE HEIST</button>
@@ -51,6 +54,7 @@
     <div id="screen-win" class="screen hidden">
       <h1 class="win">💎 CLEAN GETAWAY!</h1>
       <p class="bigline">You slipped out of Aurum National Bank with the diamond.</p>
+      <p id="win-rating" class="rating"></p>
       <p id="win-stats" class="stats"></p>
       <button id="btn-again-win" class="big" type="button">↻ &nbsp;PLAY AGAIN</button>
     </div>
