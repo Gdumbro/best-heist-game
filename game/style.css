@@ -36,7 +36,10 @@ body {
 }
 .hud-right { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; min-width: 170px; }
 .hud-right .stat b { color: #ffd94d; }
-#cam-status.off { color: #8d97ad !important; }
+#cam-status.off, #laser-status.off { color: #8d97ad !important; }
+/* the ARMED laser readout pulses red while the grid is live */
+@keyframes laserblink { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+#laser-status.armed { animation: laserblink 1.1s ease-in-out infinite; }
 .hud-btns { display: flex; flex-direction: column; gap: 5px; }
 button { cursor: pointer; font-family: inherit; }
 .hud-btns button {

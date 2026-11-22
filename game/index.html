@@ -21,6 +21,7 @@
       <div class="stat">💎 Diamond: <b id="loot">—</b></div>
       <div class="stat">🟨 Gold bars: <b id="gold">0/3</b> <span class="dim">(+150 each, optional)</span></div>
       <div class="stat">📷 Cameras: <b id="cam-status">ONLINE</b></div>
+      <div class="stat">⚡ Lasers: <b id="laser-status">ARMED</b></div>
       <div class="stat">⏱ Time: <b id="timer">0:00</b></div>
     </div>
     <div class="hud-btns">
@@ -36,13 +37,15 @@
     <div id="screen-start" class="screen">
       <h1>MIDNIGHT VAULT</h1>
       <h2>The Aurum Job &nbsp;·&nbsp; Aurum National Bank</h2>
-      <p class="tag">One thief. One diamond. Two guards, two cameras, one very loud alarm.</p>
+      <p class="tag">One thief. One diamond. Three guards, three cameras, a laser grid, one very loud alarm.</p>
       <div class="rules">
         <div><b>🎯 Goal</b> — Cross the vault hall, grab the <span class="gold">DIAMOND</span> from the central vault, then reach the green <b>EXIT</b> door.</div>
+        <div><b>🗺 Three zones</b> — The <span class="gold">GALLERY</span> (display cases &amp; gold), the <span class="gold">VAULT</span> (the diamond, behind a laser grid), and the <span class="gold">SECURITY CORRIDOR</span> (the guarded route to the exit).</div>
         <div><b>🕹 Move</b> — WASD / Arrow keys &nbsp;·&nbsp; <b>Shift</b> sneak (slower, alarm rises half as fast)</div>
-        <div><b>✋ Interact</b> — <b>E</b> near the vault to grab the diamond · <b>E</b> near the terminal to hack the cameras</div>
-        <div><b>👁 Guards</b> — Yellow cones are their vision. Seen = alarm rockets up &amp; they chase you.</div>
-        <div><b>📷 Cameras</b> — Red cones sweep the hall. Hack the terminal to switch both cameras <b>OFF for 8s</b>.</div>
+        <div><b>✋ Interact</b> — <b>E</b> near the vault to grab the diamond · <b>E</b> near the terminal to hack the cameras <b>and</b> the lasers</div>
+        <div><b>👁 Guards</b> — Yellow cones are their vision. Seen = alarm rockets up &amp; they chase you (and give up sooner once they lose sight). Three guards, three different patrols: the Gallery loop, the right-side diamond, and the Security corridor.</div>
+        <div><b>📷 Cameras</b> — Red cones sweep the hall. Hack the terminal to switch all three cameras <b>OFF for 8s</b>.</div>
+        <div><b>⚡ Laser grid</b> — Red beams guard the vault approach. They fire in a timed cycle — watch the flicker, slip through the gaps, or hack them <b>OFF for 8s</b>. Crossing a live beam trips the alarm (a red ⚡ ring flashes around you while you stand in one).</div>
         <div><b>🟨 Bonus loot</b> — Three <span class="gold">GOLD BARS</span> are hidden around the hall (+150 score each). Grabbing them is optional — but risky.</div>
         <div><b>🏆 Rating</b> — Your getaway is rated on your peak alarm: <b>GHOST</b> (under 25%), <b>SHADOW</b> (under 60%), or <b>LOUD</b>.</div>
         <div><b>🚨 Alarm</b> — At 100% you are <b>BUSTED</b>. Hide behind desks &amp; pillars to let it fall.</div>
@@ -73,7 +76,7 @@
     </div>
 
     <div id="toast"></div>
-    <button id="btn-hack" class="hidden" type="button">⌨ HACK CAMERAS (E)</button>
+    <button id="btn-hack" class="hidden" type="button">⌨ HACK CAMERAS + LASERS (E)</button>
     <button id="btn-grab" class="hidden" type="button">💎 GRAB DIAMOND (E)</button>
   </div>
 
