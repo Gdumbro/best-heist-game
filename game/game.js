@@ -3,6 +3,9 @@
    Canvas 960x600. WASD/arrows move, Shift sneak, E grab/hack, R restart, P/Esc pause, M mute.
    Round 6: three zones in one frame (Gallery / Vault / Security corridor),
    3 guards, 3 cameras, and a timed laser grid across the vault approach.
+   Round 7: 4 guards, 4 cameras, a sweeping laser turret on the vault,
+   alarm escalation (ALERT / LOCKDOWN + response guard), and 2 stealable
+   gallery paintings. Same hall, same gold/red-carpet identity.
 */
 (function () {
   'use strict';
@@ -16,11 +19,11 @@
       camEl = $('cam-status'), laserEl = $('laser-status'), timerEl = $('timer'),
       objectiveEl = $('objective'), toastEl = $('toast'), btnHack = $('btn-hack'),
       btnGrab = $('btn-grab'), goldEl = $('gold'), alarmStateEl = $('alarm-state'),
-      winRatingEl = $('win-rating');
+      winRatingEl = $('win-rating'), artEl = $('art');
 
   /* ---------------- level layout (fixed, deterministic) ---------------- */
   // Three zones in one hall, split by gold floor lines at x=330 and x=630:
-  //   Gallery (left) — display cases + gold bars; Vault (centre) — diamond + lasers;
+  //   Gallery (left) — display cases + gold bars + paintings; Vault (centre) — diamond + lasers;
   //   Security corridor (right) — the guarded route to the green EXIT.
   var ZONE_L = 330, ZONE_R = 630;
   var VAULT = { x: 400, y: 200, w: 160, h: 120 };
@@ -28,20 +31,29 @@
   var EXIT = { x: 872, y: 512, w: 56, h: 56 };
   var TERMINAL = { x: 36, y: 262, w: 22, h: 48, cx: 60, cy: 286 };
   var GOLD_SPOTS = [{ x: 300, y: 88 }, { x: 660, y: 88 }, { x: 890, y: 300 }];
+  // Two gallery paintings, stealable by walking over them (+100 score each).
+  // On the left wall strip, clear of the desks, the terminal and the guard loops.
+  var ART_SPOTS = [{ x: 70, y: 140 }, { x: 70, y: 440 }];
   // Timed laser grid across the red-carpet vault approach (x 430..530).
-  // Each beam cycles: on for LASER_ON, off for the rest of LASER_PERIOD.
-  var LASER_X1 = 430, LASER_X2 = 530, LASER_PERIOD = 2.6, LASER_ON = 1.5;
+  // Each beam cycles: on for LASER_ON, off for the rest of the period.
+  // At LOCKDOWN the grid fires faster (period 2.6s -> 1.9s).
+  var LASER_X1 = 430, LASER_X2 = 530, LASER_PERIOD = 2.6, LASER_PERIOD_LOCK = 1.9, LASER_ON = 1.5;
   var LASERS = [
     { y: 350, phase: 0.0 },
     { y: 395, phase: 0.9 },
     { y: 440, phase: 1.8 }
   ];
+  // Sweeping laser: a rotating emitter turret on the vault's bottom edge.
+  // Its beam sweeps +/-SWEEP across the carpet approach below the vault.
+  // Length 150 keeps the beam inside the vault approach (max y = 472): it must
+  // not reach the y=510 bottom route or the (480,500) laser-test wait spot.
+  var SWEEPER = { x: 480, y: 322, base: Math.PI / 2, sweep: 0.9, speed: 0.45, len: 150 };
   var OBSTACLES = [
     VAULT,
-    { x: 180, y: 120, w: 140, h: 46 },   // desk top-left
-    { x: 640, y: 120, w: 140, h: 46 },   // desk top-right
-    { x: 180, y: 434, w: 140, h: 46 },   // desk bottom-left
-    { x: 640, y: 434, w: 140, h: 46 },   // desk bottom-right
+    { x: 160, y: 120, w: 140, h: 46 },   // desk top-left (gap to the pillar is 50px: a 38px thief must fit through)
+    { x: 660, y: 120, w: 140, h: 46 },   // desk top-right
+    { x: 160, y: 434, w: 140, h: 46 },   // desk bottom-left
+    { x: 660, y: 434, w: 140, h: 46 },   // desk bottom-right
     { x: 350, y: 120, w: 36, h: 36 },    // pillar top-left
     { x: 574, y: 120, w: 36, h: 36 },    // pillar top-right
     { x: 350, y: 444, w: 36, h: 36 },    // pillar bottom-left
@@ -54,17 +66,28 @@
   var state = 'start';           // start | playing | paused | win | lose
   var alarm = 0, loot = false, elapsed = 0, muted = false;
   var gold = 0, goldBars = [];   // optional secondary loot: 3 gold bars, +150 each
+  var art = 0, artPieces = [];   // optional secondary loot: 2 paintings, +100 each
   var peakAlarm = 0;             // highest alarm reached this run (drives the end rating)
   var systemsOffUntil = -1;      // hack timer: cameras AND lasers off while time < this
   var seenNow = false, seenBy = '', chaseFlash = 0;
   var toastTimer = 0, tickTimer = 0, time = 0;   // time = deterministic clock (seconds)
-  var player, guards, cameras;
+  var sweeperAngle = Math.PI / 2, sweeperHits = 0; // rotating beam angle + times it touched the thief
+  var player, guards, cameras, response;  // response = LOCKDOWN response guard (dormant until alarm >= 60)
+
+  // Alarm escalation: 0 CALM (<30%), 1 ALERT (>=30%), 2 LOCKDOWN (>=65%).
+  // ALERT speeds cameras x1.25 and guards x1.1; LOCKDOWN adds red alert lighting,
+  // a faster laser grid, cameras x1.5 / guards x1.2, and the response guard.
+  // Thresholds sit above a single brief sighting on purpose: one camera flash
+  // must not start a death spiral (round-7 tuning: ALERT was 25% and the faster
+  // cameras fed sightings back into the alarm until every top route busted).
+  function alertLevel() { return alarm >= 65 ? 2 : (alarm >= 30 ? 1 : 0); }
 
   function resetGame() {
     state = 'playing'; alarm = 0; loot = false; elapsed = 0; time = 0;
     systemsOffUntil = -1; seenNow = false; seenBy = ''; toastTimer = 0;
-    gold = 0; peakAlarm = 0;
+    gold = 0; art = 0; peakAlarm = 0; sweeperAngle = Math.PI / 2; sweeperHits = 0;
     goldBars = GOLD_SPOTS.map(function (s) { return { x: s.x, y: s.y, taken: false }; });
+    artPieces = ART_SPOTS.map(function (s) { return { x: s.x, y: s.y, taken: false }; });
     player = { x: 84, y: 516, r: 19, speed: 175, sneaking: false, face: -Math.PI / 2 };
     guards = [
       // Guard 1: slow rectangular loop down the left hall (Gallery), counter-clockwise
@@ -84,14 +107,36 @@
       // route and chased the thief all the way to the door. Left leg x=790 clears
       // the display case (ends x=760); bottom leg y=400 clears the bottom-right desk.
       { x: 790, y: 300, r: 14, wp: [{ x: 790, y: 300 }, { x: 860, y: 300 }, { x: 860, y: 400 }, { x: 790, y: 400 }], wi: 1,
-        angle: 0, speed: 76, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.9 }
+        angle: 0, speed: 76, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.9 },
+      // Guard 4: NEW (round 7) — back-and-forth along the Gallery north-west
+      // corner, (70,60) <-> (140,60), slow with long look-around pauses. It
+      // only ever faces east/west, guarding the north-west corner and the
+      // gold bars' approach. The beat sits in the clear corridor between the
+      // top wall and the desks, so the guard never walks through furniture.
+      // Its cone only briefly grazes the top route's west end (the thief is
+      // in range for ~35px at the (300,95) start) and never covers the GHOST
+      // route: the left edge, the vault approach, the (150,260)->(84,400)
+      // diagonal and the y=510 bottom route are all out of its cone or out
+      // of range. (The first three beats — the bottom strip, the Gallery
+      // centre, the top corridor — each put its cone across a main route and
+      // poisoned the GHOST run or busted the win route.) A second, distinct
+      // patrol shape next to the three loops.
+      { x: 70, y: 60, r: 14, wp: [{ x: 70, y: 60 }, { x: 140, y: 60 }], wi: 1,
+        angle: 0, speed: 60, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 1.4 }
     ];
+    // Response guard: dormant until LOCKDOWN (alarm >= 65), then it deploys at
+    // the exit corridor and patrols there until the alarm falls below 45%.
+    response = { x: 880, y: 470, r: 14, wp: [{ x: 820, y: 440 }, { x: 900, y: 440 }, { x: 900, y: 500 }, { x: 820, y: 500 }], wi: 1,
+      angle: 0, speed: 96, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.5, dormant: true };
     cameras = [
       { x: 42, y: 42, base: 0.88, sweep: 0.62, speed: 0.7, phase: 0, angle: 0.88, range: 245, seen: false },
-      { x: 918, y: 42, base: Math.PI - 0.88, sweep: 0.9, speed: 0.45, phase: 2.4, angle: Math.PI - 0.88, range: 265, seen: false },
+      { x: 918, y: 42, base: Math.PI - 0.88, sweep: 0.9, speed: 0.45, phase: 2.4, angle: Math.PI - 0.88, range: 240, seen: false },
       // Camera 3: NEW — bottom-centre wall mount, sweeping up the red carpet over
       // the laser grid and the vault approach. Far from the spawn point (dist ~400 > range).
-      { x: 480, y: 545, base: -Math.PI / 2, sweep: 0.75, speed: 0.55, phase: 1.2, angle: -Math.PI / 2, range: 280, seen: false }
+      { x: 480, y: 545, base: -Math.PI / 2, sweep: 0.75, speed: 0.55, phase: 1.2, angle: -Math.PI / 2, range: 280, seen: false },
+      // Camera 4: NEW (round 7) — bottom-centre-left wall mount, sweeping the
+      // bottom corridor. Range 200 keeps it off the spawn point (dist ~220).
+      { x: 300, y: 558, base: -Math.PI / 2, sweep: 0.5, speed: 0.6, phase: 3.1, angle: -Math.PI / 2, range: 200, seen: false }
     ];
     updateHUD();
     showScreen(null);
@@ -203,8 +248,21 @@
     return false;
   }
   function moveCircle(e, dx, dy) {
-    if (!collides(e.x + dx, e.y, e.r)) e.x += dx;
-    if (!collides(e.x, e.y + dy, e.r)) e.y += dy;
+    // Axis-separated steps, so the circle slides along a wall instead of
+    // stopping dead on a diagonal approach.
+    var movedX = false, movedY = false;
+    if (!collides(e.x + dx, e.y, e.r)) { e.x += dx; movedX = true; }
+    if (!collides(e.x, e.y + dy, e.r)) { e.y += dy; movedY = true; }
+    // Wedged: a diagonal step with both axes blocked (squeezed into a corner
+    // pocket between two obstacles). Back off along the opposite of the
+    // blocked move so the next frame can slide around the obstacle instead
+    // of sitting stuck until the player (or the test driver) gives up.
+    // A single-axis move never wedges: its free axis already moved (movedX
+    // is true for a zero dx step, since the current spot is free).
+    if (!movedX && !movedY && (dx || dy)) {
+      if (!collides(e.x - dx, e.y, e.r)) e.x -= dx;
+      else if (!collides(e.x, e.y - dy, e.r)) e.y -= dy;
+    }
   }
   function canSee(ox, oy, angle, range, halfAngle) {
     var d = dist(ox, oy, player.x, player.y);
@@ -218,15 +276,34 @@
 
   /* ---------------- lasers ---------------- */
   // A beam is live while its cycle position is inside the ON window, unless hacked.
-  function laserCycle(b) { return (time + b.phase) % LASER_PERIOD; }
+  // At LOCKDOWN the grid fires faster: the period shortens, so the gaps shrink.
+  function laserPeriod() { return alertLevel() === 2 ? LASER_PERIOD_LOCK : LASER_PERIOD; }
+  function laserCycle(b) { return (time + b.phase) % laserPeriod(); }
   function laserActive(b) { return systemsOffUntil <= time && laserCycle(b) < LASER_ON; }
   function laserWarming(b) {
     // Last 0.4s of the OFF window: the beam flickers as a warning that it is about to fire.
-    return systemsOffUntil <= time && !laserActive(b) && laserCycle(b) > LASER_PERIOD - 0.4;
+    return systemsOffUntil <= time && !laserActive(b) && laserCycle(b) > laserPeriod() - 0.4;
   }
   function laserHitsPlayer(b) {
     return player.x > LASER_X1 - 6 && player.x < LASER_X2 + 6 &&
       Math.abs(player.y - b.y) < player.r + 3;
+  }
+
+  /* ---------------- sweeping laser ---------------- */
+  // The turret on the vault's bottom edge rotates its beam across the carpet
+  // approach. The beam is a line segment; it touches the thief when the thief's
+  // centre comes within (r + 2) of the segment.
+  function sweeperActive() { return systemsOffUntil <= time; }
+  function sweeperHitsPlayer() {
+    if (!sweeperActive()) return false;
+    var ex = SWEEPER.x + Math.cos(sweeperAngle) * SWEEPER.len;
+    var ey = SWEEPER.y + Math.sin(sweeperAngle) * SWEEPER.len;
+    var dx = ex - SWEEPER.x, dy = ey - SWEEPER.y;
+    var len2 = dx * dx + dy * dy;
+    var t = ((player.x - SWEEPER.x) * dx + (player.y - SWEEPER.y) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    var px = SWEEPER.x + t * dx, py = SWEEPER.y + t * dy;
+    return dist(player.x, player.y, px, py) < player.r + 2;
   }
 
   /* ---------------- interact ---------------- */
@@ -253,6 +330,49 @@
   }
 
   /* ---------------- update ---------------- */
+  // One guard's patrol / chase step, shared by the four patrol guards and the
+  // LOCKDOWN response guard. speedMul comes from the alarm escalation level.
+  function stepGuard(gd, dt, speedMul) {
+    gd.seen = false;
+    if (gd.cooldown > 0) gd.cooldown -= dt;
+    if (gd.chase > 0) {
+      gd.chase -= dt;
+      var ta = Math.atan2(gd.chaseY - gd.y, gd.chaseX - gd.x);
+      gd.angle += angDiff(ta, gd.angle) * Math.min(1, dt * 8);
+      moveCircle(gd, Math.cos(gd.angle) * 118 * dt, Math.sin(gd.angle) * 118 * dt);
+      // Reached the last-seen spot: give up and resume the patrol. Without this
+      // a guard that chased a thief standing still (e.g. grabbing the diamond)
+      // would stand point-blank on them for the full 1.8s chase at ~44 alarm/s.
+      var cd = dist(gd.x, gd.y, gd.chaseX, gd.chaseY);
+      if (cd < 14) { gd.chase = 0; gd.chaseStuck = 0; gd.cooldown = 1.5; }
+      else {
+        // Stuck: the chase target is behind an obstacle (e.g. the vault) and the
+        // guard is sliding along it without getting closer. Give up instead of
+        // standing there staring at the thief while the alarm climbs to 100.
+        if (gd.chaseLastD === undefined || cd < gd.chaseLastD - 8) { gd.chaseLastD = cd; gd.chaseStuck = 0; }
+        else {
+          gd.chaseStuck = (gd.chaseStuck || 0) + dt;
+          if (gd.chaseStuck > 0.6) { gd.chase = 0; gd.chaseStuck = 0; gd.cooldown = 1.5; }
+        }
+      }
+      // Chase timer ran out: the guard gives up and cannot start a new chase
+      // for 1.5s. Without the cooldown a guard standing ON the thief (it just
+      // chased them down) re-triggers the chase every single frame and the
+      // alarm climbs at ~44/s forever while the guard never walks away.
+      if (gd.chase <= 0) { gd.cooldown = Math.max(gd.cooldown || 0, 1.5); }
+    } else {
+      var tgt = gd.wp[gd.wi];
+      var d = dist(gd.x, gd.y, tgt.x, tgt.y);
+      if (d < 6) { gd.wi = (gd.wi + 1) % gd.wp.length; gd.pause = gd.pauseDur || 0.7; }
+      else if (gd.pause > 0) { gd.pause -= dt; }
+      else {
+        var a = Math.atan2(tgt.y - gd.y, tgt.x - gd.x);
+        gd.angle += angDiff(a, gd.angle) * Math.min(1, dt * 8);
+        moveCircle(gd, Math.cos(gd.angle) * gd.speed * speedMul * dt, Math.sin(gd.angle) * gd.speed * speedMul * dt);
+      }
+    }
+  }
+
   function update(dt) {
     time += dt; elapsed += dt;
     if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) toastEl.classList.remove('show'); }
@@ -268,41 +388,43 @@
       moveCircle(player, mx / len * sp * dt, my / len * sp * dt);
     }
 
+    // escalation level drives camera sweep, guard speed and the laser grid
+    var level = alertLevel();
+    var camMul = level === 2 ? 1.5 : (level === 1 ? 1.25 : 1);
+    var guardMul = level === 2 ? 1.2 : (level === 1 ? 1.1 : 1);
+
     // cameras sweep (deterministic, driven by `time`; each camera has its own speed)
     var sysOff = systemsOffUntil > time;
     for (var i = 0; i < cameras.length; i++) {
       var c = cameras[i];
-      c.angle = c.base + Math.sin(time * c.speed + c.phase) * c.sweep;
+      c.angle = c.base + Math.sin(time * c.speed * camMul + c.phase) * c.sweep;
       c.seen = false;
     }
 
-    // guards: patrol / chase
-    for (var g = 0; g < guards.length; g++) {
-      var gd = guards[g]; gd.seen = false;
-      if (gd.chase > 0) {
-        gd.chase -= dt;
-        var ta = Math.atan2(gd.chaseY - gd.y, gd.chaseX - gd.x);
-        gd.angle += angDiff(ta, gd.angle) * Math.min(1, dt * 8);
-        moveCircle(gd, Math.cos(gd.angle) * 118 * dt, Math.sin(gd.angle) * 118 * dt);
-        if (gd.chase <= 0) { /* resume patrol from nearest waypoint */ }
-      } else {
-        var tgt = gd.wp[gd.wi];
-        var d = dist(gd.x, gd.y, tgt.x, tgt.y);
-        if (d < 6) { gd.wi = (gd.wi + 1) % gd.wp.length; gd.pause = gd.pauseDur || 0.7; }
-        else if (gd.pause > 0) { gd.pause -= dt; }
-        else {
-          var a = Math.atan2(tgt.y - gd.y, tgt.x - gd.x);
-          gd.angle += angDiff(a, gd.angle) * Math.min(1, dt * 8);
-          moveCircle(gd, Math.cos(gd.angle) * gd.speed * dt, Math.sin(gd.angle) * gd.speed * dt);
-        }
-      }
+    // sweeping laser turret rotates (deterministic, driven by `time`)
+    sweeperAngle = SWEEPER.base + Math.sin(time * SWEEPER.speed) * SWEEPER.sweep;
+
+    // LOCKDOWN: deploy the response guard at the exit corridor; stand it down
+    // once the alarm has fallen well below the trigger, so the exit opens again.
+    if (level === 2 && response.dormant) {
+      response.dormant = false; response.x = 880; response.y = 470; response.wi = 1; response.chase = 0;
+      toast('🚨 LOCKDOWN — RESPONSE UNIT DEPLOYED AT THE EXIT!');
+      sfx('seen');
+    } else if (level < 2 && !response.dormant && alarm < 45) {
+      response.dormant = true;
+      toast('Response unit stood down — the alarm is falling.');
     }
+
+    // guards: patrol / chase (the response guard joins in while deployed)
+    for (var g = 0; g < guards.length; g++) stepGuard(guards[g], dt, guardMul);
+    if (!response.dormant) stepGuard(response, dt, guardMul);
 
     // vision + alarm
     seenNow = false; seenBy = '';
     var speedFactor = player.sneaking ? 0.5 : (mx || my ? 1.35 : 1.0);
-    for (var gi = 0; gi < guards.length; gi++) {
-      var gg = guards[gi];
+    var seers = guards.concat(response.dormant ? [] : [response]);
+    for (var gi = 0; gi < seers.length; gi++) {
+      var gg = seers[gi];
       if (canSee(gg.x, gg.y, gg.angle, 195, 0.56)) {
         gg.seen = true; seenNow = true; seenBy = 'GUARD';
         var gd2 = dist(gg.x, gg.y, player.x, player.y);
@@ -311,8 +433,9 @@
         // A guard that loses sight gives up sooner now (1.8s, was 2.5s), and it
         // chases the LAST SEEN SPOT, not the thief: the old code re-aimed the chase
         // at the thief every frame, so a guard that spotted the thief in a straight
-        // corridor tracked them down the whole hall and never let go.
-        if (gg.chase <= 0) { gg.chase = 1.8; gg.chaseX = player.x; gg.chaseY = player.y; sfx('seen'); }
+        // corridor tracked them down the whole hall and never let go. A guard on
+        // its post-chase cooldown cannot start a new chase yet (see stepGuard).
+        if (gg.chase <= 0 && (gg.cooldown || 0) <= 0) { gg.chase = 1.8; gg.chaseX = player.x; gg.chaseY = player.y; gg.chaseLastD = undefined; gg.chaseStuck = 0; sfx('seen'); }
       }
     }
     if (!sysOff) {
@@ -334,8 +457,15 @@
           if (tickTimer <= 0) { sfx('laser'); }
         }
       }
+      // sweeping laser: standing in the rotating beam trips the alarm too.
+      if (sweeperHitsPlayer()) {
+        seenNow = true; if (!seenBy) seenBy = 'SWEEPER';
+        alarm += 30 * speedFactor * dt;
+        sweeperHits++;
+        if (tickTimer <= 0) { sfx('laser'); }
+      }
     }
-    if (!seenNow) alarm -= 9 * dt;
+    if (!seenNow) alarm -= 11 * dt;
     alarm = Math.max(0, Math.min(100, alarm));
     if (alarm > peakAlarm) peakAlarm = alarm;
 
@@ -345,6 +475,15 @@
       if (!bar.taken && dist(player.x, player.y, bar.x, bar.y) < 34) {
         bar.taken = true; gold += 1; sfx('pickup');
         toast('🟨 GOLD BAR secured! +' + 150 + ' — ' + gold + '/3 bars (optional loot)');
+        updateHUD();
+      }
+    }
+    // optional secondary loot: walk over a gallery painting to lift it (+100 each)
+    for (var ai = 0; ai < artPieces.length; ai++) {
+      var piece = artPieces[ai];
+      if (!piece.taken && dist(player.x, player.y, piece.x, piece.y) < 32) {
+        piece.taken = true; art += 1; sfx('pickup');
+        toast('🖼 PAINTING lifted! +100 — ' + art + '/2 paintings (optional loot)');
         updateHUD();
       }
     }
@@ -359,10 +498,10 @@
         player.y + player.r > EXIT.y && player.y - player.r < EXIT.y + EXIT.h) {
       state = 'win'; sfx('win');
       var rating = endRating();
-      var score = (loot ? 1000 : 0) + gold * 150;
+      var score = (loot ? 1000 : 0) + gold * 150 + art * 100;
       winRatingEl.textContent = '★ RATING: ' + rating.name + ' — ' + rating.blurb + ' ★';
       winRatingEl.style.color = rating.color;
-      $('win-stats').textContent = 'Time ' + fmtTime(elapsed) + '  ·  Peak alarm ' + Math.round(peakAlarm) + '%  ·  Diamond secured 💎  ·  Gold bars ' + gold + '/3  ·  Score ' + score;
+      $('win-stats').textContent = 'Time ' + fmtTime(elapsed) + '  ·  Peak alarm ' + Math.round(peakAlarm) + '%  ·  Diamond secured 💎  ·  Gold bars ' + gold + '/3  ·  Paintings ' + art + '/2  ·  Score ' + score;
       showScreen('screen-win'); updateHUD(); return;
     }
     if (alarm >= 100) {
@@ -385,13 +524,16 @@
   function updateHUD() {
     alarmFill.style.width = alarm + '%';
     alarmNum.textContent = Math.round(alarm);
-    alarmFill.style.background = alarm < 35 ? 'linear-gradient(90deg,#37d67a,#7be495)'
-      : alarm < 70 ? 'linear-gradient(90deg,#ffd94d,#ff9d2e)' : 'linear-gradient(90deg,#ff3b30,#ff7a5c)';
+    alarmFill.style.background = alarm < 30 ? 'linear-gradient(90deg,#37d67a,#7be495)'
+      : alarm < 65 ? 'linear-gradient(90deg,#ffd94d,#ff9d2e)' : 'linear-gradient(90deg,#ff3b30,#ff7a5c)';
     if (alarmStateEl) {
-      var st = alarm < 35 ? ['QUIET', '#4dff9d'] : alarm < 70 ? ['RISKY', '#ffd94d'] : ['LOUD!', '#ff5a4d'];
+      // Escalation stages: QUIET <30%, ALERT 30-64% (cameras + guards speed up),
+      // LOCKDOWN >=65% (red alert, faster lasers, response guard at the exit).
+      var st = alarm < 30 ? ['QUIET', '#4dff9d'] : alarm < 65 ? ['ALERT', '#ffd94d'] : ['LOCKDOWN!', '#ff5a4d'];
       alarmStateEl.textContent = st[0]; alarmStateEl.style.color = st[1];
     }
     if (goldEl) goldEl.textContent = gold + '/3';
+    if (artEl) artEl.textContent = art + '/2';
     lootEl.textContent = loot ? '✦ SECURED' : '—';
     lootEl.style.color = loot ? '#4dff9d' : '';
     var sysOff = systemsOffUntil > time;
@@ -468,6 +610,14 @@
     lightPool(900, 540, 170, 'rgba(120,255,170,0.08)');
     lightPool(260, 330, 150, 'rgba(255,200,80,0.06)');
     lightPool(700, 330, 150, 'rgba(255,200,80,0.06)');
+    // escalation lighting: ALERT warms the hall, LOCKDOWN floods it red —
+    // the whole room visibly changes when the alarm climbs.
+    if (alertLevel() === 1) {
+      ctx.fillStyle = 'rgba(255,140,40,0.05)'; ctx.fillRect(WALL, WALL, W - 2 * WALL, H - 2 * WALL);
+    } else if (alertLevel() === 2) {
+      ctx.fillStyle = 'rgba(255,30,20,0.10)'; ctx.fillRect(WALL, WALL, W - 2 * WALL, H - 2 * WALL);
+      lightPool(480, 300, 420, 'rgba(255,40,30,0.10)');
+    }
     // red carpet runner down the middle, gold-edged, leading straight to the vault
     ctx.fillStyle = 'rgba(158,28,44,0.42)'; ctx.fillRect(440, WALL, 80, H - 2 * WALL);
     ctx.fillStyle = '#d4af37'; ctx.fillRect(438, WALL, 3, H - 2 * WALL); ctx.fillRect(519, WALL, 3, H - 2 * WALL);
@@ -484,12 +634,18 @@
       gd.wp.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
       ctx.closePath(); ctx.stroke();
     });
+    if (response && !response.dormant) {
+      ctx.beginPath();
+      response.wp.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.closePath(); ctx.stroke();
+    }
     ctx.setLineDash([]);
 
     // vision cones (under obstacles, so walls block them visually)
     var sysOff = systemsOffUntil > time;
-    for (var i = 0; i < guards.length; i++) {
-      var g = guards[i];
+    var coneGuards = guards.concat(response && !response.dormant ? [response] : []);
+    for (var i = 0; i < coneGuards.length; i++) {
+      var g = coneGuards[i];
       drawCone(g.x, g.y, g.angle, 195, 0.56,
         g.seen ? 'rgba(255,60,40,0.34)' : 'rgba(255,214,64,0.26)', g.seen ? '#ff3b30' : 'rgba(255,214,64,0.55)');
     }
@@ -543,6 +699,37 @@
     ctx.strokeStyle = sysOffNow ? '#8d97ad' : '#ff5a4d'; ctx.lineWidth = 1.5; rr(480 - 62, 462, 124, 20, 6); ctx.stroke();
     ctx.fillStyle = sysOffNow ? '#8d97ad' : '#ff8a80'; ctx.font = '900 11px "Segoe UI", Arial'; ctx.textAlign = 'center';
     ctx.fillText(sysOffNow ? '⚡ LASERS OFF' : '⚡ LASER GRID', 480, 476);
+
+    // --- sweeping laser: turret on the vault's bottom edge + rotating beam ---
+    var swX = SWEEPER.x + Math.cos(sweeperAngle) * SWEEPER.len;
+    var swY = SWEEPER.y + Math.sin(sweeperAngle) * SWEEPER.len;
+    if (sweeperActive()) {
+      ctx.save();
+      ctx.shadowColor = '#ff3b30'; ctx.shadowBlur = 14;
+      ctx.strokeStyle = 'rgba(255,59,48,0.85)'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(SWEEPER.x, SWEEPER.y); ctx.lineTo(swX, swY); ctx.stroke();
+      ctx.strokeStyle = '#ffd0c8'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(SWEEPER.x, SWEEPER.y); ctx.lineTo(swX, swY); ctx.stroke();
+      ctx.restore();
+      // bright tip dot where the beam ends
+      ctx.fillStyle = '#ff3b30';
+      ctx.beginPath(); ctx.arc(swX, swY, 5, 0, 7); ctx.fill();
+      ctx.fillStyle = '#ffd0c8';
+      ctx.beginPath(); ctx.arc(swX, swY, 2.5, 0, 7); ctx.fill();
+    } else {
+      ctx.strokeStyle = 'rgba(140,150,170,0.3)'; ctx.setLineDash([4, 8]); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(SWEEPER.x, SWEEPER.y); ctx.lineTo(swX, swY); ctx.stroke(); ctx.setLineDash([]);
+    }
+    // turret base on the vault edge
+    ctx.fillStyle = sweeperActive() ? '#c81e1e' : '#3a4358';
+    ctx.beginPath(); ctx.arc(SWEEPER.x, SWEEPER.y, 10, 0, 7); ctx.fill();
+    ctx.strokeStyle = sweeperActive() ? '#ff6b5e' : '#8d97ad'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = sweeperActive() ? '#ff3b30' : '#5a6b7a';
+    ctx.beginPath(); ctx.arc(SWEEPER.x, SWEEPER.y, 4, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(5,9,20,0.78)'; rr(SWEEPER.x - 58, 496, 116, 18, 5); ctx.fill();
+    ctx.strokeStyle = sweeperActive() ? '#ff5a4d' : '#8d97ad'; ctx.lineWidth = 1.5; rr(SWEEPER.x - 58, 496, 116, 18, 5); ctx.stroke();
+    ctx.fillStyle = sweeperActive() ? '#ff8a80' : '#8d97ad'; ctx.font = '900 10px "Segoe UI", Arial'; ctx.textAlign = 'center';
+    ctx.fillText(sweeperActive() ? '⚡ SWEEPING LASER' : '⚡ SWEEPER OFF', SWEEPER.x, 509);
 
     // exit door
     ctx.save();
@@ -643,6 +830,24 @@
       ctx.fillText('GOLD +150', bar.x, bar.y - 16);
     });
 
+    // gallery paintings — framed, glowing, labelled, liftable on the way past
+    artPieces.forEach(function (piece) {
+      if (piece.taken) return;
+      var ap = 1 + Math.sin(time * 3 + piece.y) * 0.08;
+      ctx.save();
+      ctx.translate(piece.x, piece.y); ctx.scale(ap, ap);
+      ctx.shadowColor = '#ff9d5c'; ctx.shadowBlur = 14;
+      ctx.fillStyle = '#2a1a3a'; rr(-24, -18, 48, 36, 3); ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 3; rr(piece.x - 24, piece.y - 18, 48, 36, 3); ctx.stroke();
+      // tiny landscape inside the frame: gold sun over a dark hill
+      ctx.fillStyle = '#3a2a5a'; ctx.fillRect(piece.x - 19, piece.y - 13, 38, 26);
+      ctx.fillStyle = '#ffd94d'; ctx.beginPath(); ctx.arc(piece.x - 8, piece.y - 4, 6, 0, 7); ctx.fill();
+      ctx.fillStyle = '#1a2a1a'; ctx.beginPath(); ctx.moveTo(piece.x - 19, piece.y + 13); ctx.lineTo(piece.x - 2, piece.y - 2); ctx.lineTo(piece.x + 19, piece.y + 13); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffb37a'; ctx.font = '900 11px "Segoe UI", Arial'; ctx.textAlign = 'center';
+      ctx.fillText('ART +100', piece.x, piece.y - 26);
+    });
+
     // cameras (wall mounts)
     for (var c2 = 0; c2 < cameras.length; c2++) {
       var cam = cameras[c2];
@@ -658,19 +863,21 @@
       ctx.fillText(sysOff ? 'CAM OFF' : 'CAM', cam.x, cam.y > H - 100 ? cam.y - 20 : cam.y + 26);
     }
 
-    // guards
-    for (var g2 = 0; g2 < guards.length; g2++) {
-      var gd = guards[g2];
+    // guards (the response guard joins the draw list while deployed)
+    var drawGuards = guards.concat(response && !response.dormant ? [response] : []);
+    for (var g2 = 0; g2 < drawGuards.length; g2++) {
+      var gd = drawGuards[g2];
+      var isResponse = gd === response;
       ctx.save(); ctx.translate(gd.x, gd.y);
-      ctx.fillStyle = gd.seen ? '#7a1414' : '#1d2f66';
+      ctx.fillStyle = gd.seen ? '#7a1414' : (isResponse ? '#4a0d0d' : '#1d2f66');
       ctx.beginPath(); ctx.arc(0, 0, gd.r + 2, 0, 7); ctx.fill();
-      ctx.strokeStyle = gd.seen ? '#ff3b30' : '#ffd94d'; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.strokeStyle = gd.seen ? '#ff3b30' : (isResponse ? '#ff5a4d' : '#ffd94d'); ctx.lineWidth = 2.5; ctx.stroke();
       // facing tick + cap
       ctx.rotate(gd.angle);
-      ctx.fillStyle = '#ffd94d'; ctx.beginPath(); ctx.moveTo(gd.r + 2, 0); ctx.lineTo(gd.r - 4, -6); ctx.lineTo(gd.r - 4, 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = isResponse ? '#ff5a4d' : '#ffd94d'; ctx.beginPath(); ctx.moveTo(gd.r + 2, 0); ctx.lineTo(gd.r - 4, -6); ctx.lineTo(gd.r - 4, 6); ctx.closePath(); ctx.fill();
       ctx.restore();
-      ctx.fillStyle = '#fff'; ctx.font = '900 11px "Segoe UI", Arial'; ctx.textAlign = 'center';
-      ctx.fillText('GUARD', gd.x, gd.y - gd.r - 8);
+      ctx.fillStyle = isResponse ? '#ff8a80' : '#fff'; ctx.font = '900 11px "Segoe UI", Arial'; ctx.textAlign = 'center';
+      ctx.fillText(isResponse ? 'RESPONSE' : 'GUARD', gd.x, gd.y - gd.r - 8);
       if (gd.seen) { ctx.fillStyle = '#ff3b30'; ctx.font = '900 20px "Segoe UI", Arial'; ctx.fillText('!', gd.x, gd.y - gd.r - 20); }
     }
 
@@ -719,7 +926,8 @@
     ctx.fillText(thiefLabel, player.x, player.y - player.r - 13);
 
     // zone labels (drawn late so they sit above the floor, below the actors' labels)
-    zoneLabel(173, 34, 'GALLERY');
+    zoneLabel(220, 34, 'GALLERY');  // centred east of guard 4's beat (70-140,60)
+    // so its "GUARD" label never collides with the zone label
     zoneLabel(480, 34, '★ VAULT ★');
     zoneLabel(787, 34, 'SECURITY CORRIDOR');
 
@@ -742,13 +950,21 @@
       ctx.fillStyle = '#8fd0ff'; ctx.font = '900 14px "Segoe UI", Arial'; ctx.textAlign = 'center';
       ctx.fillText('📷⚡ SYSTEMS OFF — ' + Math.ceil(systemsOffUntil - time) + 's', W / 2, 74);
     }
+    // LOCKDOWN banner: the room is in full alert and a response unit guards the exit
+    if (alertLevel() === 2 && state === 'playing') {
+      ctx.font = '900 16px "Segoe UI", Arial';
+      var lbw = ctx.measureText('🚨 LOCKDOWN — RESPONSE UNIT AT THE EXIT 🚨').width + 36;
+      ctx.fillStyle = 'rgba(160,10,10,0.92)'; rr(W / 2 - lbw / 2, 90, lbw, 30, 8); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+      ctx.fillText('🚨 LOCKDOWN — RESPONSE UNIT AT THE EXIT 🚨', W / 2, 111);
+    }
     // interact prompt above player
     if (state === 'playing' && nearVault() && !loot) {
       ctx.fillStyle = '#ffd94d'; ctx.font = '900 14px "Segoe UI", Arial'; ctx.textAlign = 'center';
       ctx.fillText('E — GRAB THE DIAMOND 💎', player.x, player.y - 30);
     }
     // red edge pulse when alarm high
-    if (alarm > 60 && state === 'playing') {
+    if (alarm >= 65 && state === 'playing') {
       ctx.strokeStyle = 'rgba(255,59,48,' + (0.25 + 0.35 * Math.sin(time * 6)) + ')';
       ctx.lineWidth = 8; ctx.strokeRect(4, 4, W - 8, H - 8);
     }
@@ -766,19 +982,27 @@
   window.__heist = {
     state: 'start', alarm: 0, loot: false,
     player: { x: 84, y: 516 }, guards: [], cameras: [], camerasOff: false, elapsed: 0,
-    gold: 0, goldTotal: 3, peakAlarm: 0, rating: '',
-    lasers: [], lasersOff: false, time: 0
+    gold: 0, goldTotal: 3, art: 0, artTotal: 2, peakAlarm: 0, rating: '',
+    lasers: [], lasersOff: false, time: 0,
+    sweeper: { angle: Math.PI / 2, active: true, hits: 0, touching: false },
+    alertLevel: 0, responseActive: false
   };
   function syncDebug() {
     window.__heist.state = state; window.__heist.alarm = alarm; window.__heist.loot = loot;
     window.__heist.elapsed = elapsed; window.__heist.camerasOff = systemsOffUntil > time;
     window.__heist.lasersOff = systemsOffUntil > time; window.__heist.time = time;
-    window.__heist.gold = gold; window.__heist.peakAlarm = peakAlarm;
+    window.__heist.gold = gold; window.__heist.art = art; window.__heist.peakAlarm = peakAlarm;
     window.__heist.rating = state === 'win' ? endRating().name : '';
+    window.__heist.alertLevel = alertLevel();
+    window.__heist.responseActive = !!(response && !response.dormant);
+    window.__heist.sweeper = { angle: +sweeperAngle.toFixed(2), active: sweeperActive(), hits: sweeperHits, touching: sweeperActive() && sweeperHitsPlayer() };
     if (player) { window.__heist.player.x = player.x; window.__heist.player.y = player.y; }
     window.__heist.guards = guards ? guards.map(function (g) {
       return { x: Math.round(g.x), y: Math.round(g.y), seen: g.seen, chase: g.chase > 0 };
     }) : [];
+    if (response && !response.dormant) {
+      window.__heist.guards.push({ x: Math.round(response.x), y: Math.round(response.y), seen: response.seen, chase: response.chase > 0, response: true });
+    }
     window.__heist.cameras = cameras ? cameras.map(function (c) {
       return { x: c.x, y: c.y, angle: +c.angle.toFixed(2), seen: c.seen };
     }) : [];
@@ -793,14 +1017,18 @@
   guards = [
     { x: 180, y: 415, r: 14, wp: [{ x: 180, y: 415 }, { x: 180, y: 250 }, { x: 340, y: 250 }, { x: 340, y: 415 }], wi: 1, angle: -Math.PI / 2, speed: 68, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.7 },
     { x: 820, y: 140, r: 14, wp: [{ x: 820, y: 140 }, { x: 770, y: 280 }, { x: 820, y: 460 }, { x: 860, y: 200 }], wi: 1, angle: Math.PI / 2, speed: 84, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 1.2 },
-    { x: 790, y: 300, r: 14, wp: [{ x: 790, y: 300 }, { x: 860, y: 300 }, { x: 860, y: 400 }, { x: 790, y: 400 }], wi: 1, angle: 0, speed: 76, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.9 }
+    { x: 790, y: 300, r: 14, wp: [{ x: 790, y: 300 }, { x: 860, y: 300 }, { x: 860, y: 400 }, { x: 790, y: 400 }], wi: 1, angle: 0, speed: 76, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.9 },
+    { x: 70, y: 60, r: 14, wp: [{ x: 70, y: 60 }, { x: 140, y: 60 }], wi: 1, angle: 0, speed: 60, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 1.4 }
   ];
+  response = { x: 880, y: 470, r: 14, wp: [{ x: 820, y: 440 }, { x: 900, y: 440 }, { x: 900, y: 500 }, { x: 820, y: 500 }], wi: 1, angle: 0, speed: 96, chase: 0, chaseX: 0, chaseY: 0, seen: false, pause: 0, pauseDur: 0.5, dormant: true };
   cameras = [
     { x: 42, y: 42, base: 0.88, sweep: 0.62, speed: 0.7, phase: 0, angle: 0.88, range: 245, seen: false },
-    { x: 918, y: 42, base: Math.PI - 0.88, sweep: 0.9, speed: 0.45, phase: 2.4, angle: Math.PI - 0.88, range: 265, seen: false },
-    { x: 480, y: 545, base: -Math.PI / 2, sweep: 0.75, speed: 0.55, phase: 1.2, angle: -Math.PI / 2, range: 280, seen: false }
+    { x: 918, y: 42, base: Math.PI - 0.88, sweep: 0.9, speed: 0.45, phase: 2.4, angle: Math.PI - 0.88, range: 240, seen: false },
+    { x: 480, y: 545, base: -Math.PI / 2, sweep: 0.75, speed: 0.55, phase: 1.2, angle: -Math.PI / 2, range: 280, seen: false },
+    { x: 300, y: 558, base: -Math.PI / 2, sweep: 0.5, speed: 0.6, phase: 3.1, angle: -Math.PI / 2, range: 200, seen: false }
   ];
   goldBars = GOLD_SPOTS.map(function (s) { return { x: s.x, y: s.y, taken: false }; });
+  artPieces = ART_SPOTS.map(function (s) { return { x: s.x, y: s.y, taken: false }; });
   // autostart for screenshots / headless testing: ?autostart=1
   if (/[?&]autostart=1/.test(window.location.search)) { resetGame(); }
 
@@ -809,9 +1037,10 @@
     var dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (state === 'playing') update(dt);
     else {
-      // idle animation behind start/pause/win/lose screens: sweep cameras only
+      // idle animation behind start/pause/win/lose screens: sweep cameras + sweeper only
       time += dt;
       for (var i = 0; i < cameras.length; i++) cameras[i].angle = cameras[i].base + Math.sin(time * cameras[i].speed + cameras[i].phase) * cameras[i].sweep;
+      sweeperAngle = SWEEPER.base + Math.sin(time * SWEEPER.speed) * SWEEPER.sweep;
       if (state === 'start') { /* guards hold still on the start frame for a clean screenshot */ }
     }
     render(); syncDebug();

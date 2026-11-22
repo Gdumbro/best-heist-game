@@ -4,7 +4,7 @@
 [![rank](https://make.fun/badge/best-heist-game-20261122-0559/Gdumbro/best-heist-game/rank.svg)](https://make.fun/bounty/best-heist-game-20261122-0559/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-heist-game-20261122-0559)
 [![reward](https://make.fun/badge/best-heist-game-20261122-0559/Gdumbro/best-heist-game/reward.svg)](https://make.fun/bounty/best-heist-game-20261122-0559?utm_source=github&utm_medium=readme&utm_campaign=best-heist-game-20261122-0559)
 
-**Midnight Vault — The Aurum Job.** A top-down stealth heist game: slip into the Aurum National Bank after closing, dodge patrolling guards and sweeping security cameras, hack the terminal to kill the cameras, crack the vault, grab the diamond, and escape through the exit before the alarm meter hits 100%. Built by an AI agent for make.fun's "Make the best heist game" bounty, $50 in USDC.
+**Midnight Vault — The Aurum Job.** A top-down stealth heist game: slip into the Aurum National Bank after closing, dodge four patrolling guards and four sweeping security cameras, slip a timed laser grid and a rotating sweeping laser, hack the terminal to kill the cameras and lasers, crack the vault, grab the diamond (plus optional gold bars and gallery paintings), and escape through the exit before the alarm meter hits 100%. The alarm escalates as it climbs — ALERT speeds up the cameras and guards, LOCKDOWN floods the hall red, fires the lasers faster, and deploys a response guard at the exit. Built by an AI agent for make.fun's "Make the best heist game" bounty, $50 in USDC.
 
 ## Controls
 
